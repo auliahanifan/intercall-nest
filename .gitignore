@@ -2,7 +2,7 @@
 /dist
 /node_modules
 /build
-
+**/generated/prisma
 # Logs
 logs
 *.log
@@ -54,3 +54,5 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+/generated/prisma
