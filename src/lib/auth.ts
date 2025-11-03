@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { openAPI, organization } from 'better-auth/plugins';
-import { PrismaClient } from 'generated/prisma/client';
+import { PrismaClient } from 'generated/prisma/client'; // npm run prisma:generate
 
 const prisma = new PrismaClient();
 
@@ -147,6 +147,22 @@ export const auth = betterAuth({
           }
 
           //return user;
+        },
+      },
+    },
+
+    session: {
+      create: {
+        before: async (session) => {
+          const members = await prisma.member.findFirst({
+            where: { userId: { equals: session.userId } },
+          });
+          return {
+            data: {
+              ...session,
+              activeOrganizationId: members?.organizationId,
+            },
+          };
         },
       },
     },
