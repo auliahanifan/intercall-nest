@@ -1,2 +1,2 @@
 git pull origin main
-npm run prisma:generate && npm run start
+pm2 restart all
