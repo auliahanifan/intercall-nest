@@ -74,7 +74,7 @@ export class TranscriptionGateway
         `WebSocket client connected: ${socket.id} (user: ${session.user.id})`,
         'TranscriptionGateway',
       );
-      this.logger.debug(
+      this.logger.log(
         `Connection details: ${JSON.stringify(clientInfo)}`,
         'TranscriptionGateway',
       );
@@ -99,7 +99,7 @@ export class TranscriptionGateway
       `WebSocket client disconnected: ${socket.id} (user: ${userId})`,
       'TranscriptionGateway',
     );
-    this.logger.debug(
+    this.logger.log(
       `Disconnect details: ${JSON.stringify(disconnectInfo)}`,
       'TranscriptionGateway',
     );
@@ -119,7 +119,7 @@ export class TranscriptionGateway
       receivedAt: new Date().toISOString(),
     };
 
-    this.logger.debug(
+    this.logger.log(
       `Audio chunk received from user ${userId}: ${JSON.stringify(messageInfo)}`,
       'TranscriptionGateway',
     );
