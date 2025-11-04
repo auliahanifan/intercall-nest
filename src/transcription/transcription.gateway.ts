@@ -17,7 +17,9 @@ import { LoggerService } from '../common/logger/logger.service';
     origin: '*',
   },
 })
-export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class TranscriptionGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
@@ -69,7 +71,7 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
       receivedAt: new Date().toISOString(),
     };
 
-    this.logger.debug(
+    this.logger.log(
       `Audio chunk received: ${JSON.stringify(messageInfo)}`,
       'TranscriptionGateway',
     );
