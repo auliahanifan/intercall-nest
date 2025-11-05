@@ -66,10 +66,28 @@ export class TranscriptionGateway
       (socket as any).user = session.user;
       (socket as any).session = session;
 
+      // Extract conversationId and targetLanguage from query parameters
+      const conversationId = socket.handshake.query.conversationId as string;
+      const targetLanguage = socket.handshake.query.targetLanguage as string;
+
+      if (!conversationId || !targetLanguage) {
+        this.logger.warn(
+          `Missing conversationId or targetLanguage for socket ${socket.id}`,
+          'TranscriptionGateway',
+        );
+        socket.disconnect();
+        return;
+      }
+
+      (socket as any).conversationId = conversationId;
+      (socket as any).targetLanguage = targetLanguage;
+
       const clientInfo = {
         socketId: socket.id,
         userId: session.user.id,
         userEmail: session.user.email,
+        conversationId,
+        targetLanguage,
         clientAddress: socket.handshake.address,
         userAgent: socket.handshake.headers['user-agent'],
         connectedAt: new Date().toISOString(),
@@ -83,6 +101,25 @@ export class TranscriptionGateway
         `Connection details: ${JSON.stringify(clientInfo)}`,
         'TranscriptionGateway',
       );
+
+      // Initialize Soniox connection immediately
+      try {
+        await this.transcriptionService.initializeConversation(
+          conversationId,
+          targetLanguage,
+        );
+        this.logger.log(
+          `Soniox connection initialized for conversation ${conversationId}`,
+          'TranscriptionGateway',
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to initialize Soniox connection: ${error.message}`,
+          'TranscriptionGateway',
+        );
+        socket.disconnect();
+        return;
+      }
     } catch (error) {
       this.logger.error(
         `Auth failed for socket ${socket.id}: ${error.message}`,
@@ -94,10 +131,12 @@ export class TranscriptionGateway
 
   handleDisconnect(@ConnectedSocket() socket: Socket) {
     const userId = (socket as any).user?.id;
+    const conversationId = (socket as any).conversationId;
 
     const disconnectInfo = {
       socketId: socket.id,
       userId: userId,
+      conversationId: conversationId,
       disconnectedAt: new Date().toISOString(),
     };
 
@@ -109,6 +148,22 @@ export class TranscriptionGateway
       `Disconnect details: ${JSON.stringify(disconnectInfo)}`,
       'TranscriptionGateway',
     );
+
+    // Clean up Soniox connection if exists
+    if (conversationId) {
+      try {
+        this.transcriptionService.closeConversation(conversationId);
+        this.logger.log(
+          `Soniox connection closed for conversation ${conversationId}`,
+          'TranscriptionGateway',
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to close Soniox connection: ${error.message}`,
+          'TranscriptionGateway',
+        );
+      }
+    }
   }
 
   @SubscribeMessage('audio_chunk')

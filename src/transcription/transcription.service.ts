@@ -16,6 +16,89 @@ export class TranscriptionService {
   constructor() {}
 
   /**
+   * Initialize Soniox connection immediately when socket connects
+   * This is called from the WebSocket gateway during connection setup
+   */
+  async initializeConversation(
+    conversationId: string,
+    targetLanguage: string,
+    sourceLanguage: string | null = null,
+  ): Promise<void> {
+    // Create or get the subject for this conversation
+    let resultSubject = this.conversationSubjects.get(conversationId);
+    if (!resultSubject) {
+      resultSubject = new Subject<TranslationResultDto>();
+      this.conversationSubjects.set(conversationId, resultSubject);
+    }
+
+    // Check if connection already exists
+    if (this.sonioxConnectionPromises.has(conversationId)) {
+      this.logger.log(
+        `Soniox connection already exists for ${conversationId}`,
+      );
+      return;
+    }
+
+    // Store conversation metadata
+    this.conversationData.set(conversationId, {
+      sourceLanguage,
+      targetLanguage,
+    });
+
+    // Create the connection promise
+    const connectionPromise = this.initializeSonioxConnection(
+      conversationId,
+      sourceLanguage,
+      targetLanguage,
+      resultSubject,
+    );
+
+    this.sonioxConnectionPromises.set(conversationId, connectionPromise);
+
+    // Handle connection events
+    connectionPromise
+      .then((ws) => {
+        ws.on('close', () => {
+          this.logger.log(
+            `Connection closed for ${conversationId}, removing promise from map.`,
+          );
+          this.sonioxConnectionPromises.delete(conversationId);
+        });
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Connection promise rejected for ${conversationId}`,
+          error,
+        );
+        this.sonioxConnectionPromises.delete(conversationId);
+      });
+
+    // Wait for connection to establish
+    await connectionPromise;
+  }
+
+  /**
+   * Close Soniox connection for a conversation
+   */
+  closeConversation(conversationId: string): void {
+    const connectionPromise = this.sonioxConnectionPromises.get(conversationId);
+    if (connectionPromise) {
+      connectionPromise
+        .then((ws) => {
+          if (ws) {
+            ws.close();
+          }
+        })
+        .catch((error) => {
+          this.logger.error(
+            `Error closing connection for ${conversationId}`,
+            error,
+          );
+        });
+    }
+  }
+
+  /**
    * Initialize Soniox connection for a conversation (auto-called on first audio chunk)
    */
   private initializeSonioxConnection(
@@ -128,7 +211,7 @@ export class TranscriptionService {
           targetLanguage,
         });
 
-        // If not, create a new one and store the promise immediately
+        // Create a new connection and store the promise immediately
         connectionPromise = this.initializeSonioxConnection(
           conversationId,
           sourceLanguage,
@@ -148,13 +231,16 @@ export class TranscriptionService {
             });
           })
           .catch((error) => {
-            // If initialization fails, remove the rejected promise
             this.logger.error(
-              `Connection promise rejected for ${conversationId}, removing from map.`,
+              `Connection promise rejected for ${conversationId}`,
               error,
             );
             this.sonioxConnectionPromises.delete(conversationId);
           });
+      } else {
+        this.logger.log(
+          `Reusing existing connection promise for ${conversationId}`,
+        );
       }
 
       // Wait for the connection promise to resolve
