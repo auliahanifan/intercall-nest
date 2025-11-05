@@ -137,7 +137,7 @@ export class TranscriptionService {
           // Use source language if provided, otherwise use common language defaults
           config.language_hints = sourceLanguage
             ? [sourceLanguage, targetLanguage]
-            : ['en', 'es', 'fr', 'de', 'zh', 'ja', 'id'];
+            : [];
 
           ws.send(JSON.stringify(config));
           resolve(ws);
