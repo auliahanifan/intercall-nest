@@ -1,5 +1,5 @@
 export interface AudioChunkDto {
-  chunk: Uint8Array;
+  chunk_base64: string;
   language: string;
   terms?: string[];
   transcriptionId: string;

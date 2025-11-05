@@ -125,7 +125,7 @@ export class TranscriptionGateway
         userId: userId,
         conversationId: transcriptionId,
         targetLanguage,
-        chunkSize: data.chunk ? Object.keys(data.chunk).length : 0,
+        chunkSize: data.chunk_base64.length, // Length of base64 string
         receivedAt: new Date().toISOString(),
       };
 
@@ -134,18 +134,15 @@ export class TranscriptionGateway
         'TranscriptionGateway',
       );
 
-      // HACK: Convert the incoming chunk object back to a Buffer.
-      // The frontend's Uint8Array is deserialized by Socket.IO into an array-like
-      // object. We need to reconstruct the Buffer from its values.
-      const audioBuffer = Buffer.from(Object.values(data.chunk as any));
-      const correctedDto: AudioChunkDto = { ...data, chunk: audioBuffer };
+      // Decode the Base64 string back to a Buffer
+      const audioBuffer = Buffer.from(data.chunk_base64, 'base64');
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
         transcriptionId,
         null, // Source language is unknown, will be auto-detected
         targetLanguage,
-        correctedDto,
+        audioBuffer,
       );
 
       // Subscribe to results if not already subscribed for this conversation

@@ -103,7 +103,7 @@ export class TranscriptionService {
     conversationId: string,
     sourceLanguage: string | null, // Can be null if unknown
     targetLanguage: string,
-    dto: AudioChunkDto,
+    chunk: Buffer,
   ): Promise<Subject<TranslationResultDto>> {
     // Get or create Subject for this conversation
     let resultSubject = this.conversationSubjects.get(conversationId);
@@ -140,7 +140,7 @@ export class TranscriptionService {
 
       // Send audio data to Soniox (raw binary)
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(dto.chunk);
+        ws.send(chunk);
       } else {
         this.logger.warn(
           `WebSocket not ready for conversation: ${conversationId}`,
