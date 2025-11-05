@@ -134,12 +134,19 @@ export class TranscriptionGateway
         'TranscriptionGateway',
       );
 
+      // HACK: Convert the incoming chunk object back to a Buffer
+      // The frontend sends a Uint8Array inside a JSON object, which gets
+      // deserialized as a plain object. We need to convert it back to a Buffer
+      // for the 'ws' library to handle it correctly.
+      const audioBuffer = Buffer.from(Object.values(data.chunk));
+      const correctedDto: AudioChunkDto = { ...data, chunk: audioBuffer as any };
+
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
         transcriptionId,
         sourceLanguage,
         data.language, // TODO: Get targetLanguage from somewhere (client data or config)
-        data,
+        correctedDto,
       );
 
       // Subscribe to results if not already subscribed for this conversation
