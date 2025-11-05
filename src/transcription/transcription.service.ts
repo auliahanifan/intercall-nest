@@ -33,9 +33,7 @@ export class TranscriptionService {
 
     // Check if connection already exists
     if (this.sonioxConnectionPromises.has(conversationId)) {
-      this.logger.log(
-        `Soniox connection already exists for ${conversationId}`,
-      );
+      this.logger.log(`Soniox connection already exists for ${conversationId}`);
       return;
     }
 
@@ -110,7 +108,9 @@ export class TranscriptionService {
     return new Promise((resolve, reject) => {
       try {
         // Initialize Soniox WebSocket connection
-        const ws = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
+        const ws = new WebSocket(
+          'wss://stt-rt.soniox.com/transcribe-websocket',
+        );
 
         ws.on('open', () => {
           this.logger.debug(
@@ -133,9 +133,11 @@ export class TranscriptionService {
             },
           };
 
-          if (sourceLanguage) {
-            config.language_hints = [sourceLanguage];
-          }
+          // Always include language_hints for Soniox accuracy
+          // Use source language if provided, otherwise use common language defaults
+          config.language_hints = sourceLanguage
+            ? [sourceLanguage, targetLanguage]
+            : ['en', 'es', 'fr', 'de', 'zh', 'ja', 'id'];
 
           ws.send(JSON.stringify(config));
           resolve(ws);
