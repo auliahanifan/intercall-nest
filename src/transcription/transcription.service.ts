@@ -25,7 +25,9 @@ export class TranscriptionService {
       const ws = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
 
       ws.on('open', () => {
-        this.logger.debug(`Soniox connection opened for conversation: ${conversationId}`);
+        this.logger.debug(
+          `Soniox connection opened for conversation: ${conversationId}`,
+        );
 
         // Send configuration to Soniox
         const config = {
@@ -50,7 +52,12 @@ export class TranscriptionService {
       ws.on('message', async (data: WebSocket.Data) => {
         try {
           const message = JSON.parse(data.toString());
-          await this.handleSonioxMessage(conversationId, message, resultSubject);
+          this.logger.log('Soniox get message', message);
+          await this.handleSonioxMessage(
+            conversationId,
+            message,
+            resultSubject,
+          );
         } catch (error) {
           this.logger.error(`Error parsing Soniox message: ${error}`);
           resultSubject.error(error);
@@ -58,12 +65,16 @@ export class TranscriptionService {
       });
 
       ws.on('error', (error) => {
-        this.logger.error(`Soniox WebSocket error for conversation ${conversationId}: ${error}`);
+        this.logger.error(
+          `Soniox WebSocket error for conversation ${conversationId}: ${error}`,
+        );
         resultSubject.error(error);
       });
 
       ws.on('close', () => {
-        this.logger.debug(`Soniox connection closed for conversation: ${conversationId}`);
+        this.logger.debug(
+          `Soniox connection closed for conversation: ${conversationId}`,
+        );
         this.sonioxConnections.delete(conversationId);
         this.conversationData.delete(conversationId);
         resultSubject.complete();
@@ -117,7 +128,9 @@ export class TranscriptionService {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(dto.chunk);
       } else {
-        this.logger.warn(`WebSocket not ready for conversation: ${conversationId}`);
+        this.logger.warn(
+          `WebSocket not ready for conversation: ${conversationId}`,
+        );
       }
 
       return resultSubject;
@@ -158,7 +171,9 @@ export class TranscriptionService {
         if (token.text) {
           // Determine if this is original or translation
           const tokenType =
-            token.translation_status === 'translation' ? 'translation' : 'original';
+            token.translation_status === 'translation'
+              ? 'translation'
+              : 'original';
           const tokenLanguage =
             tokenType === 'translation'
               ? convData.targetLanguage
