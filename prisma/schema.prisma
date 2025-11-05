@@ -26,8 +26,9 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
-  members     Member[]
-  invitations Invitation[]
+  members       Member[]
+  invitations   Invitation[]
+  conversations Conversation[]
 
   @@unique([email])
   @@map("user")
@@ -118,4 +119,30 @@ model Invitation {
   user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
 
   @@map("invitation")
+}
+
+model Conversation {
+  id             String            @id @default(cuid())
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceLanguage String
+  targetLanguage String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  transcriptions Transcription[]
+
+  @@map("conversation")
+}
+
+model Transcription {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  text           String
+  type           String       // "original" or "translation"
+  language       String
+  sourceLanguage String?      // Only for translations
+  timestamp      DateTime     @default(now())
+
+  @@map("transcription")
 }

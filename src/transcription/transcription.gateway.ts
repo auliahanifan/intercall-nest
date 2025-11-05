@@ -7,11 +7,11 @@ import {
   OnGatewayDisconnect,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { from } from 'rxjs';
-import { map } from 'rxjs/operators';
 import { Server, Socket } from 'socket.io';
 import { LoggerService } from '../common/logger/logger.service';
 import { auth } from '../lib/auth';
+import { AudioChunkDto, TranslationResultDto } from './dto';
+import { TranscriptionService } from './transcription.service';
 
 @WebSocketGateway({
   cors: {
@@ -28,7 +28,12 @@ export class TranscriptionGateway
   @WebSocketServer()
   server: Server;
 
-  constructor(private logger: LoggerService) {}
+  private conversationSubscriptions = new Map<string, any>();
+
+  constructor(
+    private logger: LoggerService,
+    private transcriptionService: TranscriptionService,
+  ) {}
 
   async handleConnection(@ConnectedSocket() socket: Socket) {
     try {
@@ -89,6 +94,7 @@ export class TranscriptionGateway
 
   handleDisconnect(@ConnectedSocket() socket: Socket) {
     const userId = (socket as any).user?.id;
+
     const disconnectInfo = {
       socketId: socket.id,
       userId: userId,
@@ -106,26 +112,72 @@ export class TranscriptionGateway
   }
 
   @SubscribeMessage('audio_chunk')
-  handleAudioChunk(
+  async handleAudioChunk(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() data: { chunk: any; language: string },
+    @MessageBody() data: AudioChunkDto,
   ) {
-    const userId = (socket as any).user?.id;
-    const messageInfo = {
-      socketId: socket.id,
-      userId: userId,
-      language: data.language,
-      chunkSize: data.chunk ? Object.keys(data.chunk).length : 0,
-      receivedAt: new Date().toISOString(),
-    };
+    try {
+      const userId = (socket as any).user?.id;
+      const { conversationId, language: sourceLanguage } = data;
 
-    this.logger.log(
-      `Audio chunk received from user ${userId}: ${JSON.stringify(messageInfo)}`,
-      'TranscriptionGateway',
-    );
+      const messageInfo = {
+        socketId: socket.id,
+        userId: userId,
+        conversationId: conversationId,
+        sourceLanguage,
+        chunkSize: data.chunk ? Object.keys(data.chunk).length : 0,
+        receivedAt: new Date().toISOString(),
+      };
 
-    return from([1, 2, 3]).pipe(
-      map((item) => ({ event: 'events', data: item })),
-    );
+      this.logger.log(
+        `Audio chunk received: ${JSON.stringify(messageInfo)}`,
+        'TranscriptionGateway',
+      );
+
+      // Send audio chunk to transcription service (auto-initializes on first chunk)
+      const resultSubject = await this.transcriptionService.transcribeRealTime(
+        conversationId,
+        sourceLanguage,
+        data.language, // TODO: Get targetLanguage from somewhere (client data or config)
+        data,
+      );
+
+      // Subscribe to results if not already subscribed for this conversation
+      if (!this.conversationSubscriptions.has(conversationId)) {
+        const subscription = resultSubject.subscribe({
+          next: (result: TranslationResultDto) => {
+            socket.emit('translation:result', result);
+          },
+          error: (error) => {
+            this.logger.error(
+              `Conversation error: ${error.message}`,
+              'TranscriptionGateway',
+            );
+            socket.emit('transcription:error', {
+              message: error.message,
+              conversationId,
+            });
+          },
+          complete: () => {
+            this.logger.log(
+              `Conversation completed: ${conversationId}`,
+              'TranscriptionGateway',
+            );
+            socket.emit('conversation:complete', { conversationId });
+            this.conversationSubscriptions.delete(conversationId);
+          },
+        });
+
+        this.conversationSubscriptions.set(conversationId, subscription);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to process audio chunk: ${error.message}`,
+        'TranscriptionGateway',
+      );
+      socket.emit('transcription:error', {
+        message: error.message,
+      });
+    }
   }
 }
