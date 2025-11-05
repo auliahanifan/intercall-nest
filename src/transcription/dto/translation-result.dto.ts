@@ -4,4 +4,6 @@ export class TranslationResultDto {
   language: string;
   sourceLanguage?: string;
   timestamp: Date;
+  isFinal?: boolean;
+  speaker?: string;
 }

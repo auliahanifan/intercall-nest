@@ -22,28 +22,29 @@ export class TranscriptionService {
   ): Promise<void> {
     try {
       // Initialize Soniox WebSocket connection
-      const ws = new WebSocket('wss://api.soniox.com/v1/transcribe');
+      const ws = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
 
       ws.on('open', () => {
         this.logger.debug(`Soniox connection opened for conversation: ${conversationId}`);
 
-        // Send initialization message to Soniox
-        const initMessage = {
-          audio_format: {
-            encoding: 'linear16',
-            sample_rate_hertz: 16000,
-            num_channels: 1,
-          },
-          language_code: sourceLanguage,
-          client_request_uuid: conversationId,
+        // Send configuration to Soniox
+        const config = {
           api_key: process.env.SONIOX_API_KEY,
+          model: 'stt-rt-v3',
+          language_hints: [sourceLanguage],
+          enable_language_identification: true,
+          enable_speaker_diarization: true,
+          enable_endpoint_detection: true,
+          audio_format: 'pcm_s16le',
+          sample_rate: 16000,
+          num_channels: 1,
           translation: {
             type: 'one_way',
             target_language: targetLanguage,
           },
         };
 
-        ws.send(JSON.stringify(initMessage));
+        ws.send(JSON.stringify(config));
       });
 
       ws.on('message', async (data: WebSocket.Data) => {
@@ -145,31 +146,51 @@ export class TranscriptionService {
       return;
     }
 
-    // Check if message contains tokens
-    if (message.token) {
-      const token = message.token;
-
-      // Determine if this is original or translation
-      const tokenType = token.translation_status === 'translation' ? 'translation' : 'original';
-      const tokenLanguage = tokenType === 'translation' ? convData.targetLanguage : convData.sourceLanguage;
-      const sourceLanguage = tokenType === 'translation' ? convData.sourceLanguage : undefined;
-
-      const result: TranslationResultDto = {
-        text: token.text || '',
-        type: tokenType,
-        language: tokenLanguage,
-        sourceLanguage,
-        timestamp: new Date(),
-      };
-
-      // Emit to client
-      resultSubject.next(result);
+    // Handle error responses from Soniox
+    if (message.error_code) {
+      this.logger.error(
+        `Soniox error: ${message.error_code} - ${message.error_message}`,
+      );
+      resultSubject.error(new Error(message.error_message));
+      return;
     }
 
-    // Handle error responses from Soniox
-    if (message.error) {
-      this.logger.error(`Soniox error: ${message.error}`);
-      resultSubject.error(new Error(message.error));
+    // Process tokens array
+    if (message.tokens && Array.isArray(message.tokens)) {
+      for (const token of message.tokens) {
+        if (token.text) {
+          // Determine if this is original or translation
+          const tokenType =
+            token.translation_status === 'translation' ? 'translation' : 'original';
+          const tokenLanguage =
+            tokenType === 'translation'
+              ? convData.targetLanguage
+              : convData.sourceLanguage;
+          const sourceLanguage =
+            tokenType === 'translation' ? convData.sourceLanguage : undefined;
+
+          const result: TranslationResultDto = {
+            text: token.text,
+            type: tokenType,
+            language: tokenLanguage,
+            sourceLanguage,
+            timestamp: new Date(),
+            isFinal: token.is_final || false,
+            speaker: token.speaker,
+          };
+
+          // Emit to client
+          resultSubject.next(result);
+        }
+      }
+    }
+
+    // Session finished
+    if (message.finished) {
+      this.logger.debug(
+        `Soniox session finished for conversation: ${conversationId}`,
+      );
+      resultSubject.complete();
     }
   }
 }
