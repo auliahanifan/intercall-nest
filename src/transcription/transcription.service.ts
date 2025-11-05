@@ -20,7 +20,7 @@ export class TranscriptionService {
    */
   private async initializeSonioxConnection(
     conversationId: string,
-    sourceLanguage: string,
+    sourceLanguage: string | null,
     targetLanguage: string,
     resultSubject: Subject<TranslationResultDto>,
   ): Promise<void> {
