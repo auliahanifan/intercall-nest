@@ -8,6 +8,10 @@ export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
   private sonioxConnections = new Map<string, WebSocket>();
   private conversationData = new Map<string, any>();
+  private conversationSubjects = new Map<
+    string,
+    Subject<TranslationResultDto>
+  >();
 
   constructor() {}
 
@@ -77,6 +81,7 @@ export class TranscriptionService {
         );
         this.sonioxConnections.delete(conversationId);
         this.conversationData.delete(conversationId);
+        this.conversationSubjects.delete(conversationId);
         resultSubject.complete();
       });
 
@@ -97,7 +102,13 @@ export class TranscriptionService {
     targetLanguage: string,
     dto: AudioChunkDto,
   ): Promise<Subject<TranslationResultDto>> {
-    let resultSubject = new Subject<TranslationResultDto>();
+    // Get or create Subject for this conversation
+    let resultSubject = this.conversationSubjects.get(conversationId);
+    if (!resultSubject) {
+      resultSubject = new Subject<TranslationResultDto>();
+      this.conversationSubjects.set(conversationId, resultSubject);
+    }
+
     let ws = this.sonioxConnections.get(conversationId);
 
     try {
