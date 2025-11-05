@@ -18,82 +18,84 @@ export class TranscriptionService {
   /**
    * Initialize Soniox connection for a conversation (auto-called on first audio chunk)
    */
-  private async initializeSonioxConnection(
+  private initializeSonioxConnection(
     conversationId: string,
     sourceLanguage: string | null,
     targetLanguage: string,
     resultSubject: Subject<TranslationResultDto>,
-  ): Promise<void> {
-    try {
-      // Initialize Soniox WebSocket connection
-      const ws = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
+  ): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Initialize Soniox WebSocket connection
+        const ws = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
 
-      ws.on('open', () => {
-        this.logger.debug(
-          `Soniox connection opened for conversation: ${conversationId}`,
-        );
-
-        // Send configuration to Soniox
-        const config: any = {
-          api_key: process.env.SONIOX_API_KEY,
-          model: 'stt-rt-v3',
-          enable_language_identification: true,
-          enable_speaker_diarization: true,
-          enable_endpoint_detection: true,
-          audio_format: 'pcm_s16le',
-          sample_rate: 16000,
-          num_channels: 1,
-          translation: {
-            type: 'one_way',
-            target_language: targetLanguage,
-          },
-        };
-
-        if (sourceLanguage) {
-          config.language_hints = [sourceLanguage];
-        }
-
-        ws.send(JSON.stringify(config));
-      });
-
-      ws.on('message', async (data: WebSocket.Data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          this.logger.log('Soniox get message', message);
-          await this.handleSonioxMessage(
-            conversationId,
-            message,
-            resultSubject,
+        ws.on('open', () => {
+          this.logger.debug(
+            `Soniox connection opened for conversation: ${conversationId}`,
           );
-        } catch (error) {
-          this.logger.error(`Error parsing Soniox message: ${error}`);
+
+          // Send configuration to Soniox
+          const config: any = {
+            api_key: process.env.SONIOX_API_KEY,
+            model: 'stt-rt-v3',
+            enable_language_identification: true,
+            enable_speaker_diarization: true,
+            enable_endpoint_detection: true,
+            audio_format: 'pcm_s16le',
+            sample_rate: 16000,
+            num_channels: 1,
+            translation: {
+              type: 'one_way',
+              target_language: targetLanguage,
+            },
+          };
+
+          if (sourceLanguage) {
+            config.language_hints = [sourceLanguage];
+          }
+
+          ws.send(JSON.stringify(config));
+          resolve(ws);
+        });
+
+        ws.on('message', async (data: WebSocket.Data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            this.logger.log('Soniox get message', message);
+            await this.handleSonioxMessage(
+              conversationId,
+              message,
+              resultSubject,
+            );
+          } catch (error) {
+            this.logger.error(`Error parsing Soniox message: ${error}`);
+            resultSubject.error(error);
+          }
+        });
+
+        ws.on('error', (error) => {
+          this.logger.error(
+            `Soniox WebSocket error for conversation ${conversationId}: ${error}`,
+          );
           resultSubject.error(error);
-        }
-      });
+          reject(error);
+        });
 
-      ws.on('error', (error) => {
-        this.logger.error(
-          `Soniox WebSocket error for conversation ${conversationId}: ${error}`,
-        );
+        ws.on('close', () => {
+          this.logger.debug(
+            `Soniox connection closed for conversation: ${conversationId}`,
+          );
+          this.sonioxConnections.delete(conversationId);
+          this.conversationData.delete(conversationId);
+          this.conversationSubjects.delete(conversationId);
+          resultSubject.complete();
+        });
+      } catch (error) {
+        this.logger.error(`Failed to initialize Soniox connection: ${error}`);
         resultSubject.error(error);
-      });
-
-      ws.on('close', () => {
-        this.logger.debug(
-          `Soniox connection closed for conversation: ${conversationId}`,
-        );
-        this.sonioxConnections.delete(conversationId);
-        this.conversationData.delete(conversationId);
-        this.conversationSubjects.delete(conversationId);
-        resultSubject.complete();
-      });
-
-      // Store the WebSocket connection
-      this.sonioxConnections.set(conversationId, ws);
-    } catch (error) {
-      this.logger.error(`Failed to initialize Soniox connection: ${error}`);
-      resultSubject.error(error);
-    }
+        reject(error);
+      }
+    });
   }
 
   /**
@@ -127,15 +129,15 @@ export class TranscriptionService {
           targetLanguage,
         });
 
-        // Initialize Soniox connection
-        await this.initializeSonioxConnection(
+        // Await the connection to be fully open and configured
+        ws = await this.initializeSonioxConnection(
           conversationId,
           sourceLanguage,
           targetLanguage,
           resultSubject,
         );
 
-        ws = this.sonioxConnections.get(conversationId);
+        this.sonioxConnections.set(conversationId, ws);
       }
 
       // Send audio data to Soniox (raw binary)
