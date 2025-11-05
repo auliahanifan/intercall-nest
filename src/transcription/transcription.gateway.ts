@@ -118,12 +118,12 @@ export class TranscriptionGateway
   ) {
     try {
       const userId = (socket as any).user?.id;
-      const { conversationId, language: sourceLanguage } = data;
+      const { transcriptionId, language: sourceLanguage } = data;
 
       const messageInfo = {
         socketId: socket.id,
         userId: userId,
-        conversationId: conversationId,
+        conversationId: transcriptionId,
         sourceLanguage,
         chunkSize: data.chunk ? Object.keys(data.chunk).length : 0,
         receivedAt: new Date().toISOString(),
@@ -136,14 +136,14 @@ export class TranscriptionGateway
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
-        conversationId,
+        transcriptionId,
         sourceLanguage,
         data.language, // TODO: Get targetLanguage from somewhere (client data or config)
         data,
       );
 
       // Subscribe to results if not already subscribed for this conversation
-      if (!this.conversationSubscriptions.has(conversationId)) {
+      if (!this.conversationSubscriptions.has(transcriptionId)) {
         const subscription = resultSubject.subscribe({
           next: (result: TranslationResultDto) => {
             socket.emit('translation:result', result);
@@ -155,20 +155,22 @@ export class TranscriptionGateway
             );
             socket.emit('transcription:error', {
               message: error.message,
-              conversationId,
+              transcriptionId,
             });
           },
           complete: () => {
             this.logger.log(
-              `Conversation completed: ${conversationId}`,
+              `Conversation completed: ${transcriptionId}`,
               'TranscriptionGateway',
             );
-            socket.emit('conversation:complete', { conversationId });
-            this.conversationSubscriptions.delete(conversationId);
+            socket.emit('conversation:complete', {
+              conversationId: transcriptionId,
+            });
+            this.conversationSubscriptions.delete(transcriptionId);
           },
         });
 
-        this.conversationSubscriptions.set(conversationId, subscription);
+        this.conversationSubscriptions.set(transcriptionId, subscription);
       }
     } catch (error) {
       this.logger.error(
