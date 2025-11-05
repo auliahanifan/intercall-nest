@@ -135,9 +135,7 @@ export class TranscriptionService {
 
           // Always include language_hints for Soniox accuracy
           // Use source language if provided, otherwise use common language defaults
-          config.language_hints = sourceLanguage
-            ? [sourceLanguage, targetLanguage]
-            : [];
+          config.language_hints = sourceLanguage ? [sourceLanguage] : [];
 
           ws.send(JSON.stringify(config));
           resolve(ws);
