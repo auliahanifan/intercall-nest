@@ -118,13 +118,13 @@ export class TranscriptionGateway
   ) {
     try {
       const userId = (socket as any).user?.id;
-      const { transcriptionId, language: sourceLanguage } = data;
+      const { transcriptionId, language: targetLanguage } = data;
 
       const messageInfo = {
         socketId: socket.id,
         userId: userId,
         conversationId: transcriptionId,
-        sourceLanguage,
+        targetLanguage,
         chunkSize: data.chunk ? Object.keys(data.chunk).length : 0,
         receivedAt: new Date().toISOString(),
       };
@@ -144,8 +144,8 @@ export class TranscriptionGateway
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
         transcriptionId,
-        sourceLanguage,
-        data.language, // TODO: Get targetLanguage from somewhere (client data or config)
+        null, // Source language is unknown, will be auto-detected
+        targetLanguage,
         correctedDto,
       );
 

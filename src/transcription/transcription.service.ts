@@ -34,10 +34,9 @@ export class TranscriptionService {
         );
 
         // Send configuration to Soniox
-        const config = {
+        const config: any = {
           api_key: process.env.SONIOX_API_KEY,
           model: 'stt-rt-v3',
-          language_hints: [sourceLanguage],
           enable_language_identification: true,
           enable_speaker_diarization: true,
           enable_endpoint_detection: true,
@@ -49,6 +48,10 @@ export class TranscriptionService {
             target_language: targetLanguage,
           },
         };
+
+        if (sourceLanguage) {
+          config.language_hints = [sourceLanguage];
+        }
 
         ws.send(JSON.stringify(config));
       });
@@ -98,7 +101,7 @@ export class TranscriptionService {
    */
   async transcribeRealTime(
     conversationId: string,
-    sourceLanguage: string,
+    sourceLanguage: string | null, // Can be null if unknown
     targetLanguage: string,
     dto: AudioChunkDto,
   ): Promise<Subject<TranslationResultDto>> {
