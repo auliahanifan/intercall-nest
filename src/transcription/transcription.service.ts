@@ -6,7 +6,7 @@ import { Subject } from 'rxjs';
 @Injectable()
 export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
-  private sonioxConnections = new Map<string, WebSocket>();
+  private sonioxConnectionPromises = new Map<string, Promise<WebSocket>>();
   private conversationData = new Map<string, any>();
   private conversationSubjects = new Map<
     string,
@@ -85,7 +85,6 @@ export class TranscriptionService {
           this.logger.debug(
             `Soniox connection closed for conversation: ${conversationId}`,
           );
-          this.sonioxConnections.delete(conversationId);
           this.conversationData.delete(conversationId);
           this.conversationSubjects.delete(conversationId);
           resultSubject.complete();
@@ -114,13 +113,13 @@ export class TranscriptionService {
       this.conversationSubjects.set(conversationId, resultSubject);
     }
 
-    let ws = this.sonioxConnections.get(conversationId);
-
     try {
-      // Auto-initialize on first chunk
-      if (!ws) {
+      // Check if a connection promise already exists
+      let connectionPromise = this.sonioxConnectionPromises.get(conversationId);
+
+      if (!connectionPromise) {
         this.logger.log(
-          `First audio chunk for conversation ${conversationId}, initializing Soniox`,
+          `No existing connection promise for ${conversationId}, creating new one.`,
         );
 
         // Store conversation metadata
@@ -129,23 +128,46 @@ export class TranscriptionService {
           targetLanguage,
         });
 
-        // Await the connection to be fully open and configured
-        ws = await this.initializeSonioxConnection(
+        // If not, create a new one and store the promise immediately
+        connectionPromise = this.initializeSonioxConnection(
           conversationId,
           sourceLanguage,
           targetLanguage,
           resultSubject,
         );
+        this.sonioxConnectionPromises.set(conversationId, connectionPromise);
 
-        this.sonioxConnections.set(conversationId, ws);
+        // Handle connection events to remove the promise from the map when done
+        connectionPromise
+          .then((ws) => {
+            ws.on('close', () => {
+              this.logger.log(
+                `Connection closed for ${conversationId}, removing promise from map.`,
+              );
+              this.sonioxConnectionPromises.delete(conversationId);
+            });
+          })
+          .catch((error) => {
+            // If initialization fails, remove the rejected promise
+            this.logger.error(
+              `Connection promise rejected for ${conversationId}, removing from map.`,
+              error,
+            );
+            this.sonioxConnectionPromises.delete(conversationId);
+          });
       }
+
+      // Wait for the connection promise to resolve
+      const ws = await connectionPromise;
 
       // Send audio data to Soniox (raw binary)
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(chunk);
       } else {
         this.logger.warn(
-          `WebSocket not ready for conversation: ${conversationId}`,
+          `WebSocket not ready for conversation: ${conversationId}. State: ${
+            ws?.readyState
+          }`,
         );
       }
 
