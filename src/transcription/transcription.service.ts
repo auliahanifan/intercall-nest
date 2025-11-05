@@ -113,12 +113,9 @@ export class TranscriptionService {
         ws = this.sonioxConnections.get(conversationId);
       }
 
-      // Send audio data to Soniox
+      // Send audio data to Soniox (raw binary)
       if (ws && ws.readyState === WebSocket.OPEN) {
-        const audioMessage = {
-          audio: Buffer.from(dto.chunk).toString('base64'),
-        };
-        ws.send(JSON.stringify(audioMessage));
+        ws.send(dto.chunk);
       } else {
         this.logger.warn(`WebSocket not ready for conversation: ${conversationId}`);
       }
