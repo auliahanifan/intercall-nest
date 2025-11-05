@@ -134,38 +134,12 @@ export class TranscriptionGateway
         'TranscriptionGateway',
       );
 
-      // --- DEEP DEBUGGING LOGS ---
-      this.logger.log(
-        `Raw data.chunk from client (first 50 chars): ${JSON.stringify(
-          data.chunk,
-        ).substring(0, 50)}`,
-        'TranscriptionGateway',
-      );
-      this.logger.log(
-        `Type of data.chunk: ${typeof data.chunk}`,
-        'TranscriptionGateway',
-      );
-      // --- END DEEP DEBUGGING LOGS ---
-
-      // HACK: Convert the incoming chunk object back to a Buffer
-      // The frontend sends a Uint8Array inside a JSON object, which gets
-      // deserialized as a plain object. We need to convert it back to a Buffer
-      // for the 'ws' library to handle it correctly.
-      const audioBuffer = Buffer.from(Object.values(data.chunk));
-      const correctedDto: AudioChunkDto = { ...data, chunk: audioBuffer as any };
-
-      // --- DEEP DEBUGGING LOGS ---
-      this.logger.log(
-        `Created audioBuffer. Length: ${audioBuffer.length}`,
-        'TranscriptionGateway',
-      );
-      this.logger.log(
-        `AudioBuffer first 10 bytes: ${audioBuffer
-          .slice(0, 10)
-          .toString('hex')}`,
-        'TranscriptionGateway',
-      );
-      // --- END DEEP DEBUGGING LOGS ---
+      // HACK: Convert the incoming chunk object back to a Buffer.
+      // The frontend's Uint8Array is deserialized by Socket.IO into an object
+      // of the shape { type: "Buffer", data: [...] }. We need to reconstruct
+      // the Buffer from the `data` property.
+      const audioBuffer = Buffer.from(data.chunk.data);
+      const correctedDto: AudioChunkDto = { ...data, chunk: audioBuffer };
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
