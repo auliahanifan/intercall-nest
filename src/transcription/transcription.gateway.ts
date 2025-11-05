@@ -135,10 +135,9 @@ export class TranscriptionGateway
       );
 
       // HACK: Convert the incoming chunk object back to a Buffer.
-      // The frontend's Uint8Array is deserialized by Socket.IO into an object
-      // of the shape { type: "Buffer", data: [...] }. We need to reconstruct
-      // the Buffer from the `data` property.
-      const audioBuffer = Buffer.from((data.chunk as any).data);
+      // The frontend's Uint8Array is deserialized by Socket.IO into an array-like
+      // object. We need to reconstruct the Buffer from its values.
+      const audioBuffer = Buffer.from(Object.values(data.chunk as any));
       const correctedDto: AudioChunkDto = { ...data, chunk: audioBuffer };
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
