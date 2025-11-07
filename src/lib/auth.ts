@@ -78,6 +78,7 @@ export const auth = betterAuth({
           ...user,
           activeOrganizationId: member?.organizationId ?? null,
           hasCompletedOnboarding: userDetail?.hasCompletedOnboarding ?? false,
+          onboardingAnswers: userDetail?.onboardingAnswers ?? null,
         },
         session,
       };
