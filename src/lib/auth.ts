@@ -68,10 +68,16 @@ export const auth = betterAuth({
         where: { userId: { equals: user.id } },
       });
 
+      // Query user details for onboarding status
+      const userDetail = await prisma.userDetail.findUnique({
+        where: { userId: user.id },
+      });
+
       return {
         user: {
           ...user,
           activeOrganizationId: member?.organizationId ?? null,
+          hasCompletedOnboarding: userDetail?.hasCompletedOnboarding ?? false,
         },
         session,
       };

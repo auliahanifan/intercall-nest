@@ -16,10 +16,11 @@ export class UserController {
     if (
       !data.hear_from ||
       !data.primary_language ||
-      !data.interpreter_specialty
+      !Array.isArray(data.interpreter_specialty) ||
+      data.interpreter_specialty.length === 0
     ) {
       throw new BadRequestException(
-        'Missing required fields: hear_from, primary_language, interpreter_specialty',
+        'Missing required fields: hear_from, primary_language, interpreter_specialty (must be non-empty array)',
       );
     }
 
