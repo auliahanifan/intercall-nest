@@ -29,9 +29,21 @@ model User {
   members       Member[]
   invitations   Invitation[]
   conversations Conversation[]
+  userDetail    UserDetail?
 
   @@unique([email])
   @@map("user")
+}
+
+model UserDetail {
+  userId                String   @id
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hasCompletedOnboarding Boolean  @default(false)
+  onboardingAnswers     Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("user_detail")
 }
 
 model Session {

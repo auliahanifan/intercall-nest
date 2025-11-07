@@ -5,10 +5,11 @@ import { AuthModule } from '@thallesp/nestjs-better-auth';
 import { auth } from './lib/auth';
 import { TranscriptionModule } from './transcription/transcription.module';
 import { LoggerModule } from './common/logger/logger.module';
+import { UserModule } from './user/user.module';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
 @Module({
-  imports: [AuthModule.forRoot({ auth }), TranscriptionModule, LoggerModule],
+  imports: [AuthModule.forRoot({ auth }), TranscriptionModule, LoggerModule, UserModule],
   controllers: [AppController],
   providers: [AppService],
 })
