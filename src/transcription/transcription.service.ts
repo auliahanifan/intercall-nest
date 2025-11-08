@@ -12,6 +12,18 @@ export class TranscriptionService {
     string,
     Subject<TranslationResultDto>
   >();
+  private accumulatedResults = new Map<
+    string,
+    {
+      originalTokens: string[];
+      translationTokens: string[];
+      startTime: Date;
+      targetLanguage: string;
+      sourceLanguage?: string;
+      vocabularies: any;
+      hasReceivedData: boolean;
+    }
+  >();
 
   constructor() {}
 
@@ -23,6 +35,7 @@ export class TranscriptionService {
     conversationId: string,
     targetLanguage: string,
     sourceLanguage: string | null = null,
+    vocabularies: any = null,
   ): Promise<void> {
     // Create or get the subject for this conversation
     let resultSubject = this.conversationSubjects.get(conversationId);
@@ -41,6 +54,17 @@ export class TranscriptionService {
     this.conversationData.set(conversationId, {
       sourceLanguage,
       targetLanguage,
+    });
+
+    // Initialize accumulated results tracker
+    this.accumulatedResults.set(conversationId, {
+      originalTokens: [],
+      translationTokens: [],
+      startTime: new Date(),
+      targetLanguage,
+      sourceLanguage: sourceLanguage || undefined,
+      vocabularies,
+      hasReceivedData: false,
     });
 
     // Create the connection promise
@@ -83,7 +107,7 @@ export class TranscriptionService {
     if (connectionPromise) {
       connectionPromise
         .then((ws) => {
-          if (ws) {
+          if (ws && ws.readyState !== WebSocket.CLOSED) {
             ws.close();
           }
         })
@@ -211,6 +235,19 @@ export class TranscriptionService {
           targetLanguage,
         });
 
+        // Initialize accumulated results tracker if not already done
+        if (!this.accumulatedResults.has(conversationId)) {
+          this.accumulatedResults.set(conversationId, {
+            originalTokens: [],
+            translationTokens: [],
+            startTime: new Date(),
+            targetLanguage,
+            sourceLanguage: sourceLanguage || undefined,
+            vocabularies: null,
+            hasReceivedData: false,
+          });
+        }
+
         // Create a new connection and store the promise immediately
         connectionPromise = this.initializeSonioxConnection(
           conversationId,
@@ -261,7 +298,10 @@ export class TranscriptionService {
     } catch (error) {
       this.logger.error(`Error processing audio chunk: ${error}`);
       resultSubject.error(error);
-      return resultSubject;
+      // Remove dead subject so next chunk creates fresh one
+      this.conversationSubjects.delete(conversationId);
+      this.accumulatedResults.delete(conversationId);
+      throw error; // Propagate error instead of returning dead subject
     }
   }
 
@@ -274,6 +314,7 @@ export class TranscriptionService {
     resultSubject: Subject<TranslationResultDto>,
   ): Promise<void> {
     const convData = this.conversationData.get(conversationId);
+    const accumulator = this.accumulatedResults.get(conversationId);
 
     if (!convData) {
       this.logger.warn(`Conversation data not found: ${conversationId}`);
@@ -286,6 +327,9 @@ export class TranscriptionService {
         `Soniox error: ${message.error_code} - ${message.error_message}`,
       );
       resultSubject.error(new Error(message.error_message));
+      // Remove dead subject so next chunk creates fresh one
+      this.conversationSubjects.delete(conversationId);
+      this.accumulatedResults.delete(conversationId);
       return;
     }
 
@@ -293,6 +337,11 @@ export class TranscriptionService {
     if (message.tokens && Array.isArray(message.tokens)) {
       for (const token of message.tokens) {
         if (token.text) {
+          // Mark that we've received data
+          if (accumulator) {
+            accumulator.hasReceivedData = true;
+          }
+
           // Determine if this is original or translation
           const tokenType =
             token.translation_status === 'translation'
@@ -304,6 +353,29 @@ export class TranscriptionService {
               : convData.sourceLanguage;
           const sourceLanguage =
             tokenType === 'translation' ? convData.sourceLanguage : undefined;
+
+          // Accumulate final tokens only
+          if (token.is_final && accumulator) {
+            if (tokenType === 'original') {
+              accumulator.originalTokens.push(token.text);
+            } else {
+              accumulator.translationTokens.push(token.text);
+            }
+          }
+
+          // Extract detected source language from Soniox if available
+          if (
+            message.detected_language &&
+            accumulator &&
+            !accumulator.sourceLanguage &&
+            tokenType === 'original'
+          ) {
+            accumulator.sourceLanguage = message.detected_language;
+            convData.sourceLanguage = message.detected_language;
+            this.logger.log(
+              `Detected source language for ${conversationId}: ${message.detected_language}`,
+            );
+          }
 
           const result: TranslationResultDto = {
             text: token.text,
@@ -328,5 +400,44 @@ export class TranscriptionService {
       );
       resultSubject.complete();
     }
+  }
+
+  /**
+   * Get accumulated results for a conversation
+   */
+  getConversationResults(conversationId: string) {
+    const accumulator = this.accumulatedResults.get(conversationId);
+
+    if (!accumulator) {
+      return {
+        transcriptionResult: '',
+        translationResult: '',
+        durationInMs: 0,
+        targetLanguage: '',
+        sourceLanguage: undefined,
+        vocabularies: null,
+      };
+    }
+
+    const durationInMs = Date.now() - accumulator.startTime.getTime();
+
+    return {
+      transcriptionResult: accumulator.originalTokens.join(' '),
+      translationResult: accumulator.translationTokens.join(' '),
+      durationInMs,
+      targetLanguage: accumulator.targetLanguage,
+      sourceLanguage: accumulator.sourceLanguage,
+      vocabularies: accumulator.vocabularies,
+    };
+  }
+
+  /**
+   * Cleanup accumulated data for a conversation
+   */
+  cleanupConversation(conversationId: string): void {
+    this.accumulatedResults.delete(conversationId);
+    this.conversationData.delete(conversationId);
+    this.conversationSubjects.delete(conversationId);
+    this.logger.debug(`Cleanup completed for conversation: ${conversationId}`);
   }
 }

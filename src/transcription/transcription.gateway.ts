@@ -12,6 +12,7 @@ import { LoggerService } from '../common/logger/logger.service';
 import { auth } from '../lib/auth';
 import { AudioChunkDto, TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
+import { PrismaService } from '../database/prisma.service';
 
 @WebSocketGateway({
   cors: {
@@ -29,10 +30,12 @@ export class TranscriptionGateway
   server: Server;
 
   private conversationSubscriptions = new Map<string, any>();
+  private cleaningUp = new Set<string>();
 
   constructor(
     private logger: LoggerService,
     private transcriptionService: TranscriptionService,
+    private prisma: PrismaService,
   ) {}
 
   async handleConnection(@ConnectedSocket() socket: Socket) {
@@ -129,28 +132,42 @@ export class TranscriptionGateway
     }
   }
 
-  handleDisconnect(@ConnectedSocket() socket: Socket) {
+  async handleDisconnect(@ConnectedSocket() socket: Socket) {
     const userId = (socket as any).user?.id;
     const conversationId = (socket as any).conversationId;
 
-    const disconnectInfo = {
-      socketId: socket.id,
-      userId: userId,
-      conversationId: conversationId,
-      disconnectedAt: new Date().toISOString(),
-    };
+    // Idempotency guard: prevent duplicate processing
+    if (!conversationId || this.cleaningUp.has(conversationId)) {
+      return;
+    }
 
-    this.logger.log(
-      `WebSocket client disconnected: ${socket.id} (user: ${userId})`,
-      'TranscriptionGateway',
-    );
-    this.logger.log(
-      `Disconnect details: ${JSON.stringify(disconnectInfo)}`,
-      'TranscriptionGateway',
-    );
+    this.cleaningUp.add(conversationId);
 
-    // Clean up Soniox connection if exists
-    if (conversationId) {
+    try {
+      const disconnectInfo = {
+        socketId: socket.id,
+        userId: userId,
+        conversationId: conversationId,
+        disconnectedAt: new Date().toISOString(),
+      };
+
+      this.logger.log(
+        `WebSocket client disconnected: ${socket.id} (user: ${userId})`,
+        'TranscriptionGateway',
+      );
+      this.logger.log(
+        `Disconnect details: ${JSON.stringify(disconnectInfo)}`,
+        'TranscriptionGateway',
+      );
+
+      // Fix memory leak: unsubscribe RxJS subscription
+      const subscription = this.conversationSubscriptions.get(conversationId);
+      if (subscription) {
+        subscription.unsubscribe();
+        this.conversationSubscriptions.delete(conversationId);
+      }
+
+      // Close Soniox connection
       try {
         this.transcriptionService.closeConversation(conversationId);
         this.logger.log(
@@ -163,6 +180,50 @@ export class TranscriptionGateway
           'TranscriptionGateway',
         );
       }
+
+      // Save transcription results to database
+      try {
+        const results =
+          this.transcriptionService.getConversationResults(conversationId);
+        const organizationId = (socket as any).user?.activeOrganizationId;
+
+        if (organizationId) {
+          await this.prisma.transcription.create({
+            data: {
+              id: conversationId,
+              organizationId,
+              durationInMs: results.durationInMs,
+              modelName: 'stt-rt-v3',
+              targetLanguage: results.targetLanguage,
+              sourceLanguage: results.sourceLanguage,
+              transcriptionResult: results.transcriptionResult || '',
+              translationResult: results.translationResult || '',
+              vocabularies: results.vocabularies,
+            },
+          });
+          this.logger.log(
+            `Transcription saved for conversation ${conversationId}`,
+            'TranscriptionGateway',
+          );
+        } else {
+          this.logger.warn(
+            `Missing organizationId for conversation ${conversationId}. Skipping database save.`,
+            'TranscriptionGateway',
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to save transcription: ${error.message}`,
+          'TranscriptionGateway',
+        );
+        // Continue with cleanup even if save fails
+      }
+
+      // Cleanup service data
+      this.transcriptionService.cleanupConversation(conversationId);
+    } finally {
+      // Remove from cleanup set
+      this.cleaningUp.delete(conversationId);
     }
   }
 
@@ -215,6 +276,13 @@ export class TranscriptionGateway
               message: error.message,
               transcriptionId,
             });
+            // Cleanup on error
+            const errorSubscription =
+              this.conversationSubscriptions.get(transcriptionId);
+            if (errorSubscription) {
+              errorSubscription.unsubscribe();
+              this.conversationSubscriptions.delete(transcriptionId);
+            }
           },
           complete: () => {
             this.logger.log(
