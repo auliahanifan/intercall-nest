@@ -321,6 +321,14 @@ export class TranscriptionService {
       return;
     }
 
+    // CRITICAL: Check if accumulator exists (indicates race condition or initialization issue)
+    if (!accumulator) {
+      this.logger.error(
+        `CRITICAL: Accumulator not found for conversation ${conversationId}. Tokens will be lost! This indicates a race condition between socket connection and Soniox message arrival.`,
+      );
+      return;
+    }
+
     // Handle error responses from Soniox
     if (message.error_code) {
       this.logger.error(
@@ -337,10 +345,8 @@ export class TranscriptionService {
     if (message.tokens && Array.isArray(message.tokens)) {
       for (const token of message.tokens) {
         if (token.text) {
-          // Mark that we've received data
-          if (accumulator) {
-            accumulator.hasReceivedData = true;
-          }
+          // Mark that we've received data (accumulator is guaranteed non-null at this point)
+          accumulator.hasReceivedData = true;
 
           // Determine if this is original or translation
           const tokenType =
@@ -356,22 +362,24 @@ export class TranscriptionService {
 
           // Accumulate ALL tokens (both final and non-final), matching frontend display
           // Filter out special "<end>" marker tokens
-          if (
-            accumulator &&
-            token.text !== '<end>' &&
-            token.text.trim() !== '<end>'
-          ) {
+          if (token.text !== '<end>' && token.text.trim() !== '<end>') {
             if (tokenType === 'original') {
               accumulator.originalTokens.push(token.text);
+              this.logger.log(
+                `Accumulated original token for ${conversationId}: "${token.text.substring(0, 50)}" (final: ${token.is_final})`,
+              );
             } else {
               accumulator.translationTokens.push(token.text);
+              this.logger.log(
+                `Accumulated translation token for ${conversationId}: "${token.text.substring(0, 50)}" (final: ${token.is_final})`,
+              );
             }
           }
 
           // Extract detected source language from Soniox if available
+          // (accumulator is guaranteed non-null at this point)
           if (
             message.detected_language &&
-            accumulator &&
             !accumulator.sourceLanguage &&
             tokenType === 'original'
           ) {
@@ -414,6 +422,9 @@ export class TranscriptionService {
     const accumulator = this.accumulatedResults.get(conversationId);
 
     if (!accumulator) {
+      this.logger.warn(
+        `No accumulator found for ${conversationId}. Returning empty results.`,
+      );
       return {
         transcriptionResult: '',
         translationResult: '',
@@ -425,6 +436,11 @@ export class TranscriptionService {
     }
 
     const durationInMs = Date.now() - accumulator.startTime.getTime();
+
+    // Log results summary for debugging
+    this.logger.log(
+      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. Duration: ${durationInMs}ms`,
+    );
 
     return {
       transcriptionResult: accumulator.originalTokens.join(''),
