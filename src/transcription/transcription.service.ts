@@ -354,8 +354,13 @@ export class TranscriptionService {
           const sourceLanguage =
             tokenType === 'translation' ? convData.sourceLanguage : undefined;
 
-          // Accumulate final tokens only
-          if (token.is_final && accumulator) {
+          // Accumulate ALL tokens (both final and non-final), matching frontend display
+          // Filter out special "<end>" marker tokens
+          if (
+            accumulator &&
+            token.text !== '<end>' &&
+            token.text.trim() !== '<end>'
+          ) {
             if (tokenType === 'original') {
               accumulator.originalTokens.push(token.text);
             } else {
@@ -422,8 +427,8 @@ export class TranscriptionService {
     const durationInMs = Date.now() - accumulator.startTime.getTime();
 
     return {
-      transcriptionResult: accumulator.originalTokens.join(' '),
-      translationResult: accumulator.translationTokens.join(' '),
+      transcriptionResult: accumulator.originalTokens.join(''),
+      translationResult: accumulator.translationTokens.join(''),
       durationInMs,
       targetLanguage: accumulator.targetLanguage,
       sourceLanguage: accumulator.sourceLanguage,

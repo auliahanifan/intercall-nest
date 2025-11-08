@@ -234,7 +234,9 @@ export class TranscriptionGateway
   ) {
     try {
       const userId = (socket as any).user?.id;
-      const { transcriptionId, language: targetLanguage } = data;
+      const { transcriptionId } = data;
+      // Use targetLanguage from socket connection (source of truth), not from audio chunk
+      const targetLanguage = (socket as any).targetLanguage;
 
       const messageInfo = {
         socketId: socket.id,
