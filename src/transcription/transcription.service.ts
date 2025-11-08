@@ -22,6 +22,8 @@ export class TranscriptionService {
       sourceLanguage?: string;
       vocabularies: any;
       hasReceivedData: boolean;
+      lastOriginalSpeaker: string | null;
+      lastTranslationSpeaker: string | null;
     }
   >();
 
@@ -65,6 +67,8 @@ export class TranscriptionService {
       sourceLanguage: sourceLanguage || undefined,
       vocabularies,
       hasReceivedData: false,
+      lastOriginalSpeaker: null,
+      lastTranslationSpeaker: null,
     });
 
     // Create the connection promise
@@ -245,6 +249,8 @@ export class TranscriptionService {
             sourceLanguage: sourceLanguage || undefined,
             vocabularies: null,
             hasReceivedData: false,
+            lastOriginalSpeaker: null,
+            lastTranslationSpeaker: null,
           });
         }
 
@@ -364,14 +370,30 @@ export class TranscriptionService {
           // Filter out special "<end>" marker tokens
           if (token.text !== '<end>' && token.text.trim() !== '<end>') {
             if (tokenType === 'original') {
+              // Add speaker label when speaker changes (matching frontend logic exactly)
+              if (token.speaker && token.speaker !== accumulator.lastOriginalSpeaker) {
+                if (accumulator.lastOriginalSpeaker !== null) {
+                  accumulator.originalTokens.push('\n\n');
+                }
+                accumulator.lastOriginalSpeaker = token.speaker;
+                accumulator.originalTokens.push(`Speaker ${token.speaker}: `);
+              }
               accumulator.originalTokens.push(token.text);
               this.logger.log(
-                `Accumulated original token for ${conversationId}: "${token.text.substring(0, 50)}" (final: ${token.is_final})`,
+                `Accumulated original token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${token.speaker}, final: ${token.is_final})`,
               );
             } else {
+              // Add speaker label when speaker changes (matching frontend logic exactly)
+              if (token.speaker && token.speaker !== accumulator.lastTranslationSpeaker) {
+                if (accumulator.lastTranslationSpeaker !== null) {
+                  accumulator.translationTokens.push('\n\n');
+                }
+                accumulator.lastTranslationSpeaker = token.speaker;
+                accumulator.translationTokens.push(`Speaker ${token.speaker}: `);
+              }
               accumulator.translationTokens.push(token.text);
               this.logger.log(
-                `Accumulated translation token for ${conversationId}: "${token.text.substring(0, 50)}" (final: ${token.is_final})`,
+                `Accumulated translation token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${token.speaker}, final: ${token.is_final})`,
               );
             }
           }
