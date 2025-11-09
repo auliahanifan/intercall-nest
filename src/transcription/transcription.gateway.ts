@@ -41,6 +41,63 @@ export class TranscriptionGateway
     private subscriptionService: SubscriptionService,
   ) {}
 
+  /**
+   * Save transcription with retry logic and exponential backoff
+   * Retries up to 3 times with delays of 1s, 2s, and 4s
+   */
+  private async saveTranscriptionWithRetry(
+    data: any,
+    conversationId: string,
+    maxRetries: number = 3,
+  ): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.log(
+          `Saving transcription (attempt ${attempt}/${maxRetries}): conversationId=${conversationId}`,
+          'TranscriptionGateway',
+        );
+
+        await this.prisma.transcription.create({ data });
+
+        this.logger.log(
+          `Transcription saved successfully: conversationId=${conversationId}`,
+          'TranscriptionGateway',
+        );
+        return; // Success, exit
+      } catch (error) {
+        lastError = error;
+
+        // Check if error is retryable (network/timeout issues)
+        const isRetryableError =
+          error.code === 'ECONNREFUSED' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ENOTFOUND' ||
+          error.message?.includes('timeout') ||
+          error.message?.includes('connection');
+
+        if (!isRetryableError || attempt === maxRetries) {
+          // Non-retryable error or last attempt - break and throw
+          break;
+        }
+
+        // Calculate backoff delay: 1s, 2s, 4s
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        this.logger.warn(
+          `Save failed (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying in ${delayMs}ms`,
+          'TranscriptionGateway',
+        );
+
+        // Wait before retrying
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    // All retries exhausted
+    throw lastError || new Error('Failed to save transcription after retries');
+  }
+
   async handleConnection(@ConnectedSocket() socket: Socket) {
     try {
       const cookies = socket.handshake.headers.cookie;
@@ -232,40 +289,89 @@ export class TranscriptionGateway
         const organizationId = (socket as any).activeOrganizationId;
 
         if (organizationId) {
-          await this.prisma.transcription.create({
-            data: {
-              id: conversationId,
-              organizationId,
-              durationInMs: results.durationInMs,
-              modelName: 'stt-rt-v3',
-              targetLanguage: results.targetLanguage,
-              sourceLanguage: results.sourceLanguage,
-              transcriptionResult: results.transcriptionResult || '',
-              translationResult: results.translationResult || '',
-              vocabularies: results.vocabularies,
-            },
-          });
+          // Validate and determine status
+          const hasReceivedData =
+            (results.transcriptionResult &&
+              results.transcriptionResult.trim().length > 0) ||
+            (results.translationResult &&
+              results.translationResult.trim().length > 0);
+
+          const hasValidTargetLanguage =
+            results.targetLanguage &&
+            results.targetLanguage.trim().length > 0;
+
+          let status = 'COMPLETED';
+          if (!hasReceivedData) {
+            status = 'NO_DATA';
+          }
+
+          // Log detailed information about what we're saving
           this.logger.log(
-            `Transcription saved for conversation ${conversationId}`,
+            `Preparing to save transcription - conversationId: ${conversationId}, ` +
+              `targetLanguage: ${results.targetLanguage || 'null'}, ` +
+              `transcriptionLength: ${results.transcriptionResult?.length || 0}, ` +
+              `translationLength: ${results.translationResult?.length || 0}, ` +
+              `hasReceivedData: ${hasReceivedData}, ` +
+              `status: ${status}, ` +
+              `durationMs: ${results.durationInMs}`,
             'TranscriptionGateway',
           );
 
-          // Record usage in subscription
-          try {
-            await this.subscriptionService.recordUsage(
-              organizationId,
-              BigInt(results.durationInMs),
-            );
-            this.logger.log(
-              `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,
+          // Only save if we have a valid target language and organization
+          if (!hasValidTargetLanguage) {
+            this.logger.warn(
+              `Missing or invalid targetLanguage for conversation ${conversationId}. Status: ${status}. Skipping save.`,
               'TranscriptionGateway',
             );
-          } catch (error) {
-            this.logger.error(
-              `Failed to record usage: ${error.message}`,
-              'TranscriptionGateway',
-            );
-            // Continue with cleanup even if usage recording fails
+          } else {
+            try {
+              const saveData = {
+                id: conversationId,
+                organizationId,
+                durationInMs: results.durationInMs,
+                modelName: 'stt-rt-v3',
+                targetLanguage: results.targetLanguage,
+                sourceLanguage: results.sourceLanguage,
+                transcriptionResult: hasReceivedData
+                  ? results.transcriptionResult
+                  : null,
+                translationResult: hasReceivedData
+                  ? results.translationResult
+                  : null,
+                vocabularies: hasReceivedData ? results.vocabularies : null,
+                status,
+              };
+
+              // Save with retry logic
+              await this.saveTranscriptionWithRetry(
+                saveData,
+                conversationId,
+              );
+
+              // Record usage in subscription
+              try {
+                await this.subscriptionService.recordUsage(
+                  organizationId,
+                  BigInt(results.durationInMs),
+                );
+                this.logger.log(
+                  `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,
+                  'TranscriptionGateway',
+                );
+              } catch (error) {
+                this.logger.error(
+                  `Failed to record usage: ${error.message}`,
+                  'TranscriptionGateway',
+                );
+                // Continue with cleanup even if usage recording fails
+              }
+            } catch (saveError) {
+              this.logger.error(
+                `Failed to save transcription after retries: ${saveError.message}`,
+                'TranscriptionGateway',
+              );
+              // Continue with cleanup even if save fails
+            }
           }
         } else {
           this.logger.warn(
@@ -275,7 +381,7 @@ export class TranscriptionGateway
         }
       } catch (error) {
         this.logger.error(
-          `Failed to save transcription: ${error.message}`,
+          `Error during transcription save process: ${error.message}`,
           'TranscriptionGateway',
         );
         // Continue with cleanup even if save fails

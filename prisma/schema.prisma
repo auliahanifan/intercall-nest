@@ -15,6 +15,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TranscriptionStatus {
+  COMPLETED
+  NO_DATA
+  FAILED
+  IN_PROGRESS
+}
+
 model User {
   id            String    @id
   name          String
@@ -135,18 +142,19 @@ model Invitation {
 }
 
 model Transcription {
-  id                   String       @id
+  id                   String                  @id
   organizationId       String
   durationInMs         BigInt
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
   vocabularies         Json?
   modelName            String
-  targetLanguage       String
+  targetLanguage       String?
   sourceLanguage       String?
-  transcriptionResult  String       @db.Text
-  translationResult    String       @db.Text
-  version              Int          @default(1)
+  transcriptionResult  String?                 @db.Text
+  translationResult    String?                 @db.Text
+  status               TranscriptionStatus    @default(COMPLETED)
+  version              Int                    @default(1)
 
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
