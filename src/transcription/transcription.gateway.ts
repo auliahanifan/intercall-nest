@@ -89,7 +89,7 @@ export class TranscriptionGateway
       (socket as any).targetLanguage = targetLanguage;
 
       // Get activeOrganizationId from session
-      const activeOrganizationId = (session as any).activeOrganizationId;
+      const activeOrganizationId = (session.user as any).activeOrganizationId;
       (socket as any).activeOrganizationId = activeOrganizationId;
 
       const clientInfo = {
