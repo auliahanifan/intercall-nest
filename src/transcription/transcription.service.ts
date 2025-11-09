@@ -30,8 +30,16 @@ export class TranscriptionService {
       isCurrentlyRecording: boolean;
       recordingSegments: Array<{ startTime: Date; endTime: Date | null }>;
       // New fields for tracking final segments with JSON format
-      finalOriginalSegments: Array<{ role: string; text: string; timestamp: number }>;
-      finalTranslationSegments: Array<{ role: string; text: string; timestamp: number }>;
+      finalOriginalSegments: Array<{
+        role: string;
+        text: string;
+        timestamp: number;
+      }>;
+      finalTranslationSegments: Array<{
+        role: string;
+        text: string;
+        timestamp: number;
+      }>;
     }
   >();
 
@@ -198,7 +206,7 @@ export class TranscriptionService {
 
           // Always include language_hints for Soniox accuracy
           // Use source language if provided, otherwise use common language defaults
-          config.language_hints = sourceLanguage ? [sourceLanguage] : [];
+          config.language_hints = sourceLanguage ? [sourceLanguage] : ['en'];
 
           ws.send(JSON.stringify(config));
           resolve(ws);
@@ -425,7 +433,10 @@ export class TranscriptionService {
           if (token.text !== '<end>' && token.text.trim() !== '<end>') {
             if (tokenType === 'original') {
               // Add speaker label when speaker changes (matching frontend logic exactly)
-              if (token.speaker && token.speaker !== accumulator.lastOriginalSpeaker) {
+              if (
+                token.speaker &&
+                token.speaker !== accumulator.lastOriginalSpeaker
+              ) {
                 if (accumulator.lastOriginalSpeaker !== null) {
                   accumulator.originalTokens.push('\n\n');
                 }
@@ -455,12 +466,17 @@ export class TranscriptionService {
               }
             } else {
               // Add speaker label when speaker changes (matching frontend logic exactly)
-              if (token.speaker && token.speaker !== accumulator.lastTranslationSpeaker) {
+              if (
+                token.speaker &&
+                token.speaker !== accumulator.lastTranslationSpeaker
+              ) {
                 if (accumulator.lastTranslationSpeaker !== null) {
                   accumulator.translationTokens.push('\n\n');
                 }
                 accumulator.lastTranslationSpeaker = token.speaker;
-                accumulator.translationTokens.push(`Speaker ${token.speaker}: `);
+                accumulator.translationTokens.push(
+                  `Speaker ${token.speaker}: `,
+                );
               }
               accumulator.translationTokens.push(token.text);
               this.logger.log(
@@ -587,9 +603,8 @@ export class TranscriptionService {
     accumulator.isCurrentlyRecording = false;
 
     // Update the last segment's end time
-    const lastSegment = accumulator.recordingSegments[
-      accumulator.recordingSegments.length - 1
-    ];
+    const lastSegment =
+      accumulator.recordingSegments[accumulator.recordingSegments.length - 1];
     if (lastSegment) {
       lastSegment.endTime = recordingEndTime;
     }
@@ -664,8 +679,12 @@ export class TranscriptionService {
     return {
       transcriptionResult: accumulator.originalTokens.join(''),
       translationResult: accumulator.translationTokens.join(''),
-      transcriptionResultJson: JSON.stringify(accumulator.finalOriginalSegments),
-      translationResultJson: JSON.stringify(accumulator.finalTranslationSegments),
+      transcriptionResultJson: JSON.stringify(
+        accumulator.finalOriginalSegments,
+      ),
+      translationResultJson: JSON.stringify(
+        accumulator.finalTranslationSegments,
+      ),
       durationInMs,
       targetLanguage: accumulator.targetLanguage,
       sourceLanguage: accumulator.sourceLanguage,
