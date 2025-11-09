@@ -254,7 +254,7 @@ export class TranscriptionGateway
           try {
             await this.subscriptionService.recordUsage(
               organizationId,
-              results.durationInMs,
+              BigInt(results.durationInMs),
             );
             this.logger.log(
               `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,

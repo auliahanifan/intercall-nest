@@ -165,7 +165,7 @@ export class SubscriptionService {
 
     const quotaMinutes = subscription.plan.quotaMinutes;
     let usedMinutes = 0;
-    let periodEnd = null;
+    let periodEnd: Date | null = null;
 
     if (!subscription.plan.quotaResetsMonthly) {
       usedMinutes = subscription.lifetimeUsageMinutes;

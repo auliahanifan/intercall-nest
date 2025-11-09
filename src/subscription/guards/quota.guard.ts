@@ -8,10 +8,9 @@ export class QuotaGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const socket = context.switchToWs().getClient();
-    const request = context.switchToWs().getRequest();
 
-    // Extract organizationId from the session
-    const organizationId = request.session?.activeOrganizationId;
+    // Extract organizationId from the socket
+    const organizationId = (socket as any).activeOrganizationId;
 
     if (!organizationId) {
       throw new Error('No active organization found in session');

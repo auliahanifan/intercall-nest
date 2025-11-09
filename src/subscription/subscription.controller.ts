@@ -8,7 +8,7 @@ export class SubscriptionController {
 
   @Get('current')
   async getCurrentSubscription(@Session() session: UserSession) {
-    const organizationId = session.activeOrganizationId;
+    const organizationId = (session.user as any).activeOrganizationId;
 
     if (!organizationId) {
       throw new Error('No active organization found in session');
@@ -24,7 +24,7 @@ export class SubscriptionController {
 
   @Get('usage')
   async getUsageHistory(@Session() session: UserSession) {
-    const organizationId = session.activeOrganizationId;
+    const organizationId = (session.user as any).activeOrganizationId;
 
     if (!organizationId) {
       throw new Error('No active organization found in session');
