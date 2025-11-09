@@ -142,7 +142,7 @@ export const auth = betterAuth({
 
               // Add user as admin member of the new organization
               if (newOrg.length > 0) {
-                await await prisma.member.createManyAndReturn({
+                await prisma.member.createManyAndReturn({
                   data: [
                     {
                       id: `member_${Date.now()}`,
@@ -153,6 +153,35 @@ export const auth = betterAuth({
                     },
                   ],
                 });
+
+                // Create a free subscription for the new organization
+                try {
+                  // Get the free plan
+                  const freePlan = await prisma.subscriptionPlan.findUnique({
+                    where: { slug: 'free' },
+                  });
+
+                  if (freePlan) {
+                    await prisma.organizationSubscription.create({
+                      data: {
+                        organizationId: newOrg[0].id,
+                        planId: freePlan.id,
+                        status: 'active',
+                        currentPeriodStart: new Date(),
+                        currentPeriodEnd: null, // Never expires for free tier
+                        lifetimeUsageMinutes: 0,
+                      },
+                    });
+
+                    console.log('Free subscription created for organization', {
+                      organizationId: newOrg[0].id,
+                      planId: freePlan.id,
+                    });
+                  }
+                } catch (error) {
+                  console.error('Error creating subscription for new organization:', error);
+                  // Don't throw - we don't want to break the organization creation flow
+                }
 
                 console.log('Default organization created successfully', {
                   organizationId: newOrg[0].id,

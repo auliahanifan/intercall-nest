@@ -102,6 +102,7 @@ model Organization {
   members        Member[]
   invitations    Invitation[]
   transcriptions Transcription[]
+  subscription   OrganizationSubscription?
 
   @@unique([slug])
   @@map("organization")
@@ -153,3 +154,62 @@ model Transcription {
   @@index([organizationId])
 }
 
+model SubscriptionPlan {
+  id                   String                      @id @default(cuid())
+  name                 String
+  slug                 String                      @unique
+  description          String?
+  price                Int                         @default(0)
+  normalPrice          Int                         @default(0)
+  promoPrice           Int?
+  isPromo              Boolean                     @default(false)
+  paymentLink          String?
+  currency             String                      @default("USD")
+  quotaMinutes         Int
+  quotaResetsMonthly   Boolean                     @default(false)
+  features             Json?
+  isActive             Boolean                     @default(true)
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  subscriptions        OrganizationSubscription[]
+
+  @@map("subscription_plan")
+  @@index([slug])
+}
+
+model OrganizationSubscription {
+  id                    String            @id @default(cuid())
+  organizationId        String            @unique
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId                String
+  plan                  SubscriptionPlan  @relation(fields: [planId], references: [id])
+  status                String            @default("active")
+  currentPeriodStart    DateTime          @default(now())
+  currentPeriodEnd      DateTime?
+  lifetimeUsageMinutes  Float             @default(0)
+  stripeSubscriptionId  String?           @unique
+  stripeCustomerId      String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  canceledAt            DateTime?
+  usagePeriods          UsagePeriod[]
+
+  @@map("organization_subscription")
+  @@index([organizationId])
+  @@index([planId])
+}
+
+model UsagePeriod {
+  id              String                   @id @default(cuid())
+  subscriptionId  String
+  subscription    OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  periodStart     DateTime
+  periodEnd       DateTime
+  usageMinutes    Float                    @default(0)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  @@map("usage_period")
+  @@index([subscriptionId, periodStart])
+  @@unique([subscriptionId, periodStart])
+}

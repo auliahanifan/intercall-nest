@@ -13,6 +13,8 @@ import { auth } from '../lib/auth';
 import { AudioChunkDto, TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
 import { PrismaService } from '../database/prisma.service';
+import { SubscriptionService } from '../subscription/subscription.service';
+import { QuotaExceededException } from '../subscription/exceptions/quota-exceeded.exception';
 
 @WebSocketGateway({
   cors: {
@@ -36,6 +38,7 @@ export class TranscriptionGateway
     private logger: LoggerService,
     private transcriptionService: TranscriptionService,
     private prisma: PrismaService,
+    private subscriptionService: SubscriptionService,
   ) {}
 
   async handleConnection(@ConnectedSocket() socket: Socket) {
@@ -85,12 +88,17 @@ export class TranscriptionGateway
       (socket as any).conversationId = conversationId;
       (socket as any).targetLanguage = targetLanguage;
 
+      // Get activeOrganizationId from session
+      const activeOrganizationId = (session as any).activeOrganizationId;
+      (socket as any).activeOrganizationId = activeOrganizationId;
+
       const clientInfo = {
         socketId: socket.id,
         userId: session.user.id,
         userEmail: session.user.email,
         conversationId,
         targetLanguage,
+        organizationId: activeOrganizationId,
         clientAddress: socket.handshake.address,
         userAgent: socket.handshake.headers['user-agent'],
         connectedAt: new Date().toISOString(),
@@ -104,6 +112,42 @@ export class TranscriptionGateway
         `Connection details: ${JSON.stringify(clientInfo)}`,
         'TranscriptionGateway',
       );
+
+      // Check quota before initializing connection
+      if (!activeOrganizationId) {
+        this.logger.warn(
+          `No active organization found for user ${session.user.id}. Disconnecting.`,
+          'TranscriptionGateway',
+        );
+        socket.disconnect();
+        return;
+      }
+
+      try {
+        await this.subscriptionService.checkQuotaAvailability(activeOrganizationId);
+        this.logger.log(
+          `Quota check passed for organization ${activeOrganizationId}`,
+          'TranscriptionGateway',
+        );
+      } catch (error) {
+        if (error instanceof QuotaExceededException) {
+          this.logger.warn(
+            `Quota exceeded for organization ${activeOrganizationId}: ${error.message}`,
+            'TranscriptionGateway',
+          );
+          socket.emit('quota:exceeded', {
+            error: error['response'].error,
+            data: error['response'].data,
+          });
+        } else {
+          this.logger.error(
+            `Quota check failed: ${error.message}`,
+            'TranscriptionGateway',
+          );
+        }
+        socket.disconnect();
+        return;
+      }
 
       // Initialize Soniox connection immediately
       try {
@@ -185,7 +229,7 @@ export class TranscriptionGateway
       try {
         const results =
           this.transcriptionService.getConversationResults(conversationId);
-        const organizationId = (socket as any).user?.activeOrganizationId;
+        const organizationId = (socket as any).activeOrganizationId;
 
         if (organizationId) {
           await this.prisma.transcription.create({
@@ -205,6 +249,24 @@ export class TranscriptionGateway
             `Transcription saved for conversation ${conversationId}`,
             'TranscriptionGateway',
           );
+
+          // Record usage in subscription
+          try {
+            await this.subscriptionService.recordUsage(
+              organizationId,
+              results.durationInMs,
+            );
+            this.logger.log(
+              `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,
+              'TranscriptionGateway',
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to record usage: ${error.message}`,
+              'TranscriptionGateway',
+            );
+            // Continue with cleanup even if usage recording fails
+          }
         } else {
           this.logger.warn(
             `Missing organizationId for conversation ${conversationId}. Skipping database save.`,
