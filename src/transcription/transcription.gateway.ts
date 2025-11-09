@@ -358,6 +358,7 @@ export class TranscriptionGateway
         await this.transcriptionService.initializeConversation(
           conversationId,
           targetLanguage,
+          null, // sourceLanguage (will be auto-detected by Soniox)
           vocabularies,
         );
         this.logger.log(
