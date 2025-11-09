@@ -210,9 +210,16 @@ export class SubscriptionService {
    * Get all available plans
    */
   async getAvailablePlans() {
-    return this.prisma.subscriptionPlan.findMany({
+    const plans = await this.prisma.subscriptionPlan.findMany({
       where: { isActive: true },
-      orderBy: { price: 'asc' },
+    });
+
+    // Sort plans in custom order: free, pro, enterprise
+    const planOrder = ['free', 'pro', 'enterprise'];
+    return plans.sort((a, b) => {
+      const indexA = planOrder.indexOf(a.slug);
+      const indexB = planOrder.indexOf(b.slug);
+      return indexA - indexB;
     });
   }
 
