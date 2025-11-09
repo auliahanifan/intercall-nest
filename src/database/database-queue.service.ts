@@ -16,7 +16,7 @@ export interface QueuedDatabaseOperation {
   priority?: number; // Higher number = higher priority
   retries?: number;
   maxRetries?: number;
-  createdAt: Date;
+  createdAt?: Date;
 }
 
 @Injectable()
@@ -37,6 +37,8 @@ export class DatabaseQueueService {
    * Returns a promise that resolves when the operation completes
    */
   async enqueue(operation: QueuedDatabaseOperation): Promise<void> {
+    // Auto-set createdAt if not provided
+    operation.createdAt = operation.createdAt || new Date();
     operation.retries = operation.retries || 0;
     operation.maxRetries = operation.maxRetries || 3;
     operation.priority = operation.priority || 0;
@@ -48,7 +50,7 @@ export class DatabaseQueueService {
       if (b.priority !== a.priority) {
         return (b.priority || 0) - (a.priority || 0);
       }
-      return a.createdAt.getTime() - b.createdAt.getTime();
+      return (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0);
     });
 
     this.logger.debug(
