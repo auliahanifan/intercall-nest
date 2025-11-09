@@ -648,10 +648,11 @@ export class TranscriptionGateway
   }
 
   @SubscribeMessage('stop_recording')
-  handleStopRecording(@ConnectedSocket() socket: Socket) {
+  async handleStopRecording(@ConnectedSocket() socket: Socket) {
     try {
       const conversationId = (socket as any).conversationId;
       const userId = (socket as any).user?.id;
+      const organizationId = (socket as any).activeOrganizationId;
 
       this.logger.log(
         `Stop recording event received: conversationId=${conversationId}, userId=${userId}`,
@@ -663,6 +664,22 @@ export class TranscriptionGateway
 
       const recordingDuration =
         this.transcriptionService.getRecordingDuration(conversationId);
+
+      // Save current transcription to database (without finalizing session)
+      // This happens on pause - session remains active for potential resume
+      try {
+        await this.savePeriodicUpdate(conversationId, organizationId);
+        this.logger.log(
+          `Transcription saved on pause for conversation ${conversationId}`,
+          'TranscriptionGateway',
+        );
+      } catch (saveError) {
+        this.logger.warn(
+          `Failed to save transcription on pause: ${saveError.message}`,
+          'TranscriptionGateway',
+        );
+        // Continue - don't fail the pause operation due to save failure
+      }
 
       socket.emit('recording:stopped', {
         conversationId,
