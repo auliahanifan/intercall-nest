@@ -14,6 +14,7 @@ import { auth } from '../lib/auth';
 import { TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
 import { PrismaService } from '../database/prisma.service';
+import { DatabaseQueueService } from '../database/database-queue.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { QuotaExceededException } from '../subscription/exceptions/quota-exceeded.exception';
 
@@ -41,6 +42,7 @@ export class TranscriptionGateway
     private logger: LoggerService,
     private transcriptionService: TranscriptionService,
     private prisma: PrismaService,
+    private databaseQueue: DatabaseQueueService,
     private subscriptionService: SubscriptionService,
   ) {}
 
@@ -102,8 +104,9 @@ export class TranscriptionGateway
   }
 
   /**
-   * Save final transcription with retry logic using upsert
+   * Save final transcription using database queue with high priority
    * Handles case where periodic updates already created the record
+   * Queues operation immediately and returns - queue handles retries
    */
   private async saveFinalTranscriptionWithRetry(
     data: {
@@ -121,173 +124,110 @@ export class TranscriptionGateway
     conversationId: string,
     maxRetries: number = 3,
   ): Promise<void> {
-    let lastError: Error | null = null;
+    this.logger.log(
+      `Queueing final transcription save: conversationId=${conversationId}, status=${data.status}`,
+      'TranscriptionGateway',
+    );
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        this.logger.log(
-          `Final transcription save (attempt ${attempt}/${maxRetries}): conversationId=${conversationId}, status=${data.status}`,
-          'TranscriptionGateway',
-        );
+    // Queue the upsert operation with high priority (processed before periodic updates)
+    await this.databaseQueue.enqueue({
+      id: `final-${conversationId}`,
+      type: 'upsert',
+      table: 'transcription',
+      where: { id: conversationId },
+      data: {
+        create: data,
+        update: {
+          durationInMs: data.durationInMs,
+          targetLanguage: data.targetLanguage,
+          sourceLanguage: data.sourceLanguage,
+          transcriptionResult: data.transcriptionResult,
+          translationResult: data.translationResult,
+          vocabularies: data.vocabularies,
+          status: data.status,
+        },
+      },
+      priority: 10, // High priority - process before periodic updates
+      maxRetries,
+    });
 
-        // Use upsert to handle case where periodic save already created the record
-        await this.prisma.transcription.upsert({
-          where: { id: conversationId },
-          create: data,
-          update: {
-            durationInMs: data.durationInMs,
-            targetLanguage: data.targetLanguage,
-            sourceLanguage: data.sourceLanguage,
-            transcriptionResult: data.transcriptionResult,
-            translationResult: data.translationResult,
-            vocabularies: data.vocabularies,
-            status: data.status,
-          },
-        });
-
-        this.logger.log(
-          `Final transcription saved successfully: conversationId=${conversationId}, status=${data.status}`,
-          'TranscriptionGateway',
-        );
-        return; // Success, exit
-      } catch (error) {
-        lastError = error;
-
-        // Check if error is retryable (network/timeout issues)
-        const isRetryableError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          error.message?.includes('timeout') ||
-          error.message?.includes('connection');
-
-        if (!isRetryableError || attempt === maxRetries) {
-          // Non-retryable error or last attempt - break and throw
-          break;
-        }
-
-        // Calculate backoff delay: 1s, 2s, 4s
-        const delayMs = Math.pow(2, attempt - 1) * 1000;
-        this.logger.warn(
-          `Final save failed (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying in ${delayMs}ms`,
-          'TranscriptionGateway',
-        );
-
-        // Wait before retrying
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-
-    // All retries exhausted
-    throw lastError || new Error('Failed to save final transcription after retries');
+    this.logger.log(
+      `Final transcription queued successfully: conversationId=${conversationId}`,
+      'TranscriptionGateway',
+    );
   }
 
   /**
    * Save periodic updates every 1 minute during active transcription
-   * Uses upsert to handle both create and update scenarios
+   * Uses database queue for non-blocking writes
+   * Does not await - queues operation and returns immediately
    */
   private async savePeriodicUpdate(
     conversationId: string,
     organizationId: string,
   ): Promise<void> {
-    let lastError: Error | null = null;
-    const maxRetries = 3;
+    // Get current accumulated results
+    const results =
+      this.transcriptionService.getConversationResults(conversationId);
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        // Get current accumulated results
-        const results =
-          this.transcriptionService.getConversationResults(conversationId);
-
-        // Skip if no data received yet
-        if (
-          !results.transcriptionResult &&
-          !results.translationResult
-        ) {
-          this.logger.debug(
-            `Skipping periodic save - no data yet for ${conversationId}`,
-            'TranscriptionGateway',
-          );
-          return;
-        }
-
-        // Validate we have a target language
-        if (!results.targetLanguage || results.targetLanguage.trim().length === 0) {
-          this.logger.warn(
-            `Skipping periodic save - missing targetLanguage for ${conversationId}`,
-            'TranscriptionGateway',
-          );
-          return;
-        }
-
-        this.logger.log(
-          `Periodic update (attempt ${attempt}/${maxRetries}): conversationId=${conversationId}, ` +
-            `transcriptionLength=${results.transcriptionResult?.length || 0}, ` +
-            `translationLength=${results.translationResult?.length || 0}`,
-          'TranscriptionGateway',
-        );
-
-        // Use upsert to create or update the record
-        await this.prisma.transcription.upsert({
-          where: { id: conversationId },
-          create: {
-            id: conversationId,
-            organizationId,
-            durationInMs: BigInt(results.durationInMs),
-            modelName: 'stt-rt-v3',
-            targetLanguage: results.targetLanguage,
-            sourceLanguage: results.sourceLanguage,
-            transcriptionResult: results.transcriptionResult,
-            translationResult: results.translationResult,
-            vocabularies: results.vocabularies,
-            status: TranscriptionStatus.IN_PROGRESS,
-          },
-          update: {
-            durationInMs: BigInt(results.durationInMs),
-            transcriptionResult: results.transcriptionResult,
-            translationResult: results.translationResult,
-            vocabularies: results.vocabularies,
-            status: TranscriptionStatus.IN_PROGRESS,
-          },
-        });
-
-        this.logger.log(
-          `Periodic update saved successfully: conversationId=${conversationId}`,
-          'TranscriptionGateway',
-        );
-        return; // Success, exit
-      } catch (error) {
-        lastError = error;
-
-        // Check if error is retryable (network/timeout issues)
-        const isRetryableError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          error.message?.includes('timeout') ||
-          error.message?.includes('connection') ||
-          error.message?.includes('deadlock');
-
-        if (!isRetryableError || attempt === maxRetries) {
-          // Non-retryable error or last attempt - log and return (don't throw)
-          this.logger.error(
-            `Periodic update failed for ${conversationId} (attempt ${attempt}/${maxRetries}): ${error.message}. Will retry on next interval.`,
-            'TranscriptionGateway',
-          );
-          return; // Return instead of throwing - session continues
-        }
-
-        // Calculate backoff delay: 1s, 2s, 4s
-        const delayMs = Math.pow(2, attempt - 1) * 1000;
-        this.logger.warn(
-          `Periodic update failed (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying in ${delayMs}ms`,
-          'TranscriptionGateway',
-        );
-
-        // Wait before retrying
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+    // Skip if no data received yet
+    if (
+      !results.transcriptionResult &&
+      !results.translationResult
+    ) {
+      this.logger.debug(
+        `Skipping periodic save - no data yet for ${conversationId}`,
+        'TranscriptionGateway',
+      );
+      return;
     }
+
+    // Validate we have a target language
+    if (!results.targetLanguage || results.targetLanguage.trim().length === 0) {
+      this.logger.warn(
+        `Skipping periodic save - missing targetLanguage for ${conversationId}`,
+        'TranscriptionGateway',
+      );
+      return;
+    }
+
+    this.logger.debug(
+      `Queueing periodic update: conversationId=${conversationId}, ` +
+        `transcriptionLength=${results.transcriptionResult?.length || 0}, ` +
+        `translationLength=${results.translationResult?.length || 0}`,
+      'TranscriptionGateway',
+    );
+
+    // Queue the upsert operation (non-blocking, fire-and-forget)
+    await this.databaseQueue.enqueue({
+      id: `periodic-${conversationId}-${Date.now()}`,
+      type: 'upsert',
+      table: 'transcription',
+      where: { id: conversationId },
+      data: {
+        create: {
+          id: conversationId,
+          organizationId,
+          durationInMs: BigInt(results.durationInMs),
+          modelName: 'stt-rt-v3',
+          targetLanguage: results.targetLanguage,
+          sourceLanguage: results.sourceLanguage,
+          transcriptionResult: results.transcriptionResult,
+          translationResult: results.translationResult,
+          vocabularies: results.vocabularies,
+          status: TranscriptionStatus.IN_PROGRESS,
+        },
+        update: {
+          durationInMs: BigInt(results.durationInMs),
+          transcriptionResult: results.transcriptionResult,
+          translationResult: results.translationResult,
+          vocabularies: results.vocabularies,
+          status: TranscriptionStatus.IN_PROGRESS,
+        },
+      },
+      priority: 1, // Lower priority than final saves
+      maxRetries: 3,
+    });
   }
 
   async handleConnection(@ConnectedSocket() socket: Socket) {
