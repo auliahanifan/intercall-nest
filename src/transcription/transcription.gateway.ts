@@ -11,7 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { TranscriptionStatus } from '../../generated/prisma/enums';
 import { LoggerService } from '../common/logger/logger.service';
 import { auth } from '../lib/auth';
-import { AudioChunkDto, StartTranscriptionDto, TranslationResultDto } from './dto';
+import { AudioChunkDto, TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
 import { PrismaService } from '../database/prisma.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -409,6 +409,16 @@ export class TranscriptionGateway
           'TranscriptionGateway',
         );
 
+        // Set up session in sessionMap so audio chunks can be processed immediately
+        this.sessionMap.set(socket.id, {
+          language: targetLanguage,
+          transcriptionId: conversationId,
+        });
+        this.logger.log(
+          `Session created in sessionMap for socket ${socket.id}: conversationId=${conversationId}, language=${targetLanguage}`,
+          'TranscriptionGateway',
+        );
+
         // Start periodic save interval (every 60 seconds = 1 minute)
         const saveInterval = setInterval(
           () => this.savePeriodicUpdate(conversationId, activeOrganizationId),
@@ -702,46 +712,6 @@ export class TranscriptionGateway
       socket.emit('recording:error', {
         message: error.message,
       });
-    }
-  }
-
-  @SubscribeMessage('start_transcription')
-  async handleStartTranscription(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() data: StartTranscriptionDto,
-  ): Promise<{ success: boolean; error?: string }> {
-    try {
-      const { language, transcriptionId, terms } = data;
-
-      this.logger.log(
-        `Start transcription event received: transcriptionId=${transcriptionId}, language=${language}`,
-        'TranscriptionGateway',
-      );
-
-      // Store session information in the session map
-      this.sessionMap.set(socket.id, { language, transcriptionId, terms });
-
-      // Also store conversationId on the socket for backward compatibility
-      (socket as any).conversationId = transcriptionId;
-
-      this.logger.log(
-        `Session started for socket ${socket.id}: transcriptionId=${transcriptionId}, language=${language}`,
-        'TranscriptionGateway',
-      );
-
-      // Return acknowledgment to frontend
-      return { success: true };
-    } catch (error) {
-      this.logger.error(
-        `Failed to start transcription: ${error.message}`,
-        'TranscriptionGateway',
-      );
-
-      // Return error acknowledgment to frontend
-      return {
-        success: false,
-        error: error.message || 'Failed to start transcription session',
-      };
     }
   }
 
