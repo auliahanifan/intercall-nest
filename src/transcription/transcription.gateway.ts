@@ -193,8 +193,8 @@ export class TranscriptionGateway
 
     this.logger.debug(
       `Queueing periodic update: conversationId=${conversationId}, ` +
-        `transcriptionLength=${results.transcriptionResult?.length || 0}, ` +
-        `translationLength=${results.translationResult?.length || 0}`,
+        `transcriptionLength=${results.transcriptionResultJson?.length || 0}, ` +
+        `translationLength=${results.translationResultJson?.length || 0}`,
       'TranscriptionGateway',
     );
 
@@ -212,15 +212,15 @@ export class TranscriptionGateway
           modelName: 'stt-rt-v3',
           targetLanguage: results.targetLanguage,
           sourceLanguage: results.sourceLanguage,
-          transcriptionResult: results.transcriptionResult,
-          translationResult: results.translationResult,
+          transcriptionResult: results.transcriptionResultJson,
+          translationResult: results.translationResultJson,
           vocabularies: results.vocabularies,
           status: TranscriptionStatus.IN_PROGRESS,
         },
         update: {
           durationInMs: BigInt(results.durationInMs),
-          transcriptionResult: results.transcriptionResult,
-          translationResult: results.translationResult,
+          transcriptionResult: results.transcriptionResultJson,
+          translationResult: results.translationResultJson,
           vocabularies: results.vocabularies,
           status: TranscriptionStatus.IN_PROGRESS,
         },
@@ -489,8 +489,8 @@ export class TranscriptionGateway
           this.logger.log(
             `Preparing to save transcription - conversationId: ${conversationId}, ` +
               `targetLanguage: ${results.targetLanguage || 'null'}, ` +
-              `transcriptionLength: ${results.transcriptionResult?.length || 0}, ` +
-              `translationLength: ${results.translationResult?.length || 0}, ` +
+              `transcriptionLength: ${results.transcriptionResultJson?.length || 0}, ` +
+              `translationLength: ${results.translationResultJson?.length || 0}, ` +
               `hasReceivedData: ${hasReceivedData}, ` +
               `hasError: ${hasError}, ` +
               `finalStatus: ${finalStatus}, ` +
@@ -514,10 +514,10 @@ export class TranscriptionGateway
                 targetLanguage: results.targetLanguage,
                 sourceLanguage: results.sourceLanguage,
                 transcriptionResult: hasReceivedData
-                  ? results.transcriptionResult
+                  ? results.transcriptionResultJson
                   : null,
                 translationResult: hasReceivedData
-                  ? results.translationResult
+                  ? results.translationResultJson
                   : null,
                 vocabularies: hasReceivedData ? results.vocabularies : null,
                 status: finalStatus,

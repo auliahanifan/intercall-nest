@@ -29,10 +29,33 @@ export class TranscriptionService {
       totalRecordingDurationMs: number;
       isCurrentlyRecording: boolean;
       recordingSegments: Array<{ startTime: Date; endTime: Date | null }>;
+      // New fields for tracking final segments with JSON format
+      finalOriginalSegments: Array<{ role: string; text: string; timestamp: number }>;
+      finalTranslationSegments: Array<{ role: string; text: string; timestamp: number }>;
     }
   >();
 
   constructor() {}
+
+  /**
+   * Helper method to append a final token to segments
+   * Combines with previous segment if same speaker, otherwise creates new segment
+   */
+  private appendFinalSegment(
+    segments: Array<{ role: string; text: string; timestamp: number }>,
+    speaker: string,
+    text: string,
+    timestamp: number,
+  ): void {
+    // Check if we can append to the last segment (same speaker)
+    if (segments.length > 0 && segments[segments.length - 1].role === speaker) {
+      // Append to existing segment
+      segments[segments.length - 1].text += text;
+    } else {
+      // Create new segment
+      segments.push({ role: speaker, text, timestamp });
+    }
+  }
 
   /**
    * Initialize Soniox connection immediately when socket connects
@@ -79,6 +102,8 @@ export class TranscriptionService {
       totalRecordingDurationMs: 0,
       isCurrentlyRecording: false,
       recordingSegments: [],
+      finalOriginalSegments: [],
+      finalTranslationSegments: [],
     });
 
     // Create the connection promise
@@ -266,6 +291,8 @@ export class TranscriptionService {
             totalRecordingDurationMs: 0,
             isCurrentlyRecording: false,
             recordingSegments: [],
+            finalOriginalSegments: [],
+            finalTranslationSegments: [],
           });
         }
 
@@ -409,6 +436,23 @@ export class TranscriptionService {
               this.logger.log(
                 `Accumulated original token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${token.speaker}, final: ${token.is_final})`,
               );
+
+              // Only accumulate FINAL tokens for database storage with speaker info
+              if (token.is_final && token.speaker) {
+                const speakerLabel = `Speaker ${token.speaker}`;
+                const timestamp = accumulator.recordingStartTime
+                  ? Date.now() - accumulator.recordingStartTime.getTime()
+                  : 0;
+                this.appendFinalSegment(
+                  accumulator.finalOriginalSegments,
+                  speakerLabel,
+                  token.text,
+                  timestamp,
+                );
+                this.logger.log(
+                  `Accumulated FINAL original token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${speakerLabel}, timestamp: ${timestamp}ms)`,
+                );
+              }
             } else {
               // Add speaker label when speaker changes (matching frontend logic exactly)
               if (token.speaker && token.speaker !== accumulator.lastTranslationSpeaker) {
@@ -422,6 +466,23 @@ export class TranscriptionService {
               this.logger.log(
                 `Accumulated translation token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${token.speaker}, final: ${token.is_final})`,
               );
+
+              // Only accumulate FINAL tokens for database storage with speaker info
+              if (token.is_final && token.speaker) {
+                const speakerLabel = `Speaker ${token.speaker}`;
+                const timestamp = accumulator.recordingStartTime
+                  ? Date.now() - accumulator.recordingStartTime.getTime()
+                  : 0;
+                this.appendFinalSegment(
+                  accumulator.finalTranslationSegments,
+                  speakerLabel,
+                  token.text,
+                  timestamp,
+                );
+                this.logger.log(
+                  `Accumulated FINAL translation token for ${conversationId}: "${token.text.substring(0, 50)}" (speaker: ${speakerLabel}, timestamp: ${timestamp}ms)`,
+                );
+              }
             }
           }
 
@@ -576,6 +637,8 @@ export class TranscriptionService {
       return {
         transcriptionResult: '',
         translationResult: '',
+        transcriptionResultJson: '[]',
+        translationResultJson: '[]',
         durationInMs: 0,
         targetLanguage: '',
         sourceLanguage: undefined,
@@ -595,12 +658,14 @@ export class TranscriptionService {
 
     // Log results summary for debugging
     this.logger.log(
-      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms (recording-based: ${accumulator.recordingSegments.length > 0}, segments: ${accumulator.recordingSegments.length})`,
+      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. ${accumulator.finalOriginalSegments.length} final original segments, ${accumulator.finalTranslationSegments.length} final translation segments. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms (recording-based: ${accumulator.recordingSegments.length > 0}, segments: ${accumulator.recordingSegments.length})`,
     );
 
     return {
       transcriptionResult: accumulator.originalTokens.join(''),
       translationResult: accumulator.translationTokens.join(''),
+      transcriptionResultJson: JSON.stringify(accumulator.finalOriginalSegments),
+      translationResultJson: JSON.stringify(accumulator.finalTranslationSegments),
       durationInMs,
       targetLanguage: accumulator.targetLanguage,
       sourceLanguage: accumulator.sourceLanguage,
