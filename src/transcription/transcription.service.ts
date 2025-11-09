@@ -22,6 +22,7 @@ export class TranscriptionService {
       sourceLanguage?: string;
       vocabularies: any;
       hasReceivedData: boolean;
+      hasError: boolean;
       lastOriginalSpeaker: string | null;
       lastTranslationSpeaker: string | null;
     }
@@ -67,6 +68,7 @@ export class TranscriptionService {
       sourceLanguage: sourceLanguage || undefined,
       vocabularies,
       hasReceivedData: false,
+      hasError: false,
       lastOriginalSpeaker: null,
       lastTranslationSpeaker: null,
     });
@@ -249,6 +251,7 @@ export class TranscriptionService {
             sourceLanguage: sourceLanguage || undefined,
             vocabularies: null,
             hasReceivedData: false,
+            hasError: false,
             lastOriginalSpeaker: null,
             lastTranslationSpeaker: null,
           });
@@ -338,12 +341,24 @@ export class TranscriptionService {
     // Handle error responses from Soniox
     if (message.error_code) {
       this.logger.error(
-        `Soniox error: ${message.error_code} - ${message.error_message}`,
+        `Soniox error: ${message.error_code} - ${message.error_message} for conversation ${conversationId}`,
       );
+
+      // CRITICAL: Mark error but KEEP accumulator for final save to prevent data loss
+      accumulator.hasError = true;
+
+      // Emit error event to client
       resultSubject.error(new Error(message.error_message));
+
       // Remove dead subject so next chunk creates fresh one
       this.conversationSubjects.delete(conversationId);
-      this.accumulatedResults.delete(conversationId);
+
+      // DO NOT delete accumulatedResults here - let handleDisconnect() save it first
+      // This prevents data loss when Soniox errors occur
+      this.logger.warn(
+        `Soniox error recorded for conversation ${conversationId}. Preserving accumulated data for final save. hasReceivedData=${accumulator.hasReceivedData}, transcriptionLength=${accumulator.originalTokens.join('').length}`,
+      );
+
       return;
     }
 
@@ -439,13 +454,14 @@ export class TranscriptionService {
 
   /**
    * Get accumulated results for a conversation
+   * Returns both results and error/data status flags
    */
   getConversationResults(conversationId: string) {
     const accumulator = this.accumulatedResults.get(conversationId);
 
     if (!accumulator) {
-      this.logger.warn(
-        `No accumulator found for ${conversationId}. Returning empty results.`,
+      this.logger.error(
+        `CRITICAL: No accumulator found for ${conversationId}. This indicates data loss! Returning empty results.`,
       );
       return {
         transcriptionResult: '',
@@ -454,6 +470,8 @@ export class TranscriptionService {
         targetLanguage: '',
         sourceLanguage: undefined,
         vocabularies: null,
+        hasReceivedData: false,
+        hasError: false,
       };
     }
 
@@ -461,7 +479,7 @@ export class TranscriptionService {
 
     // Log results summary for debugging
     this.logger.log(
-      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. Duration: ${durationInMs}ms`,
+      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms`,
     );
 
     return {
@@ -471,6 +489,8 @@ export class TranscriptionService {
       targetLanguage: accumulator.targetLanguage,
       sourceLanguage: accumulator.sourceLanguage,
       vocabularies: accumulator.vocabularies,
+      hasReceivedData: accumulator.hasReceivedData,
+      hasError: accumulator.hasError,
     };
   }
 

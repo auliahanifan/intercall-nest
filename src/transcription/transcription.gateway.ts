@@ -504,19 +504,27 @@ export class TranscriptionGateway
 
         if (organizationId) {
           // Validate and determine status
-          const hasReceivedData =
-            (results.transcriptionResult &&
-              results.transcriptionResult.trim().length > 0) ||
-            (results.translationResult &&
-              results.translationResult.trim().length > 0);
+          const hasReceivedData = results.hasReceivedData;
+          const hasError = results.hasError;
 
           const hasValidTargetLanguage =
             results.targetLanguage &&
             results.targetLanguage.trim().length > 0;
 
-          let status = 'COMPLETED';
-          if (!hasReceivedData) {
-            status = 'NO_DATA';
+          // Determine final status:
+          // - COMPLETED: Has data (preserves partial data from errors)
+          // - FAILED: No data but errors occurred
+          // - NO_DATA: No data and no errors
+          let finalStatus: TranscriptionStatus;
+          if (hasReceivedData) {
+            // ALWAYS save data if we received any, even if errors occurred
+            finalStatus = TranscriptionStatus.COMPLETED;
+          } else if (hasError) {
+            // Errors occurred but no data received
+            finalStatus = TranscriptionStatus.FAILED;
+          } else {
+            // No errors and no data (normal timeout or quick disconnect)
+            finalStatus = TranscriptionStatus.NO_DATA;
           }
 
           // Log detailed information about what we're saving
@@ -526,7 +534,8 @@ export class TranscriptionGateway
               `transcriptionLength: ${results.transcriptionResult?.length || 0}, ` +
               `translationLength: ${results.translationResult?.length || 0}, ` +
               `hasReceivedData: ${hasReceivedData}, ` +
-              `status: ${status}, ` +
+              `hasError: ${hasError}, ` +
+              `finalStatus: ${finalStatus}, ` +
               `durationMs: ${results.durationInMs}`,
             'TranscriptionGateway',
           );
@@ -534,16 +543,11 @@ export class TranscriptionGateway
           // Only save if we have a valid target language and organization
           if (!hasValidTargetLanguage) {
             this.logger.warn(
-              `Missing or invalid targetLanguage for conversation ${conversationId}. Status: ${status}. Skipping save.`,
+              `Missing or invalid targetLanguage for conversation ${conversationId}. Status: ${finalStatus}. Skipping save.`,
               'TranscriptionGateway',
             );
           } else {
             try {
-              // Determine final status enum value
-              const finalStatus: TranscriptionStatus = hasReceivedData
-                ? TranscriptionStatus.COMPLETED
-                : TranscriptionStatus.NO_DATA;
-
               const saveData = {
                 id: conversationId,
                 organizationId,
