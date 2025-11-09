@@ -618,6 +618,68 @@ export class TranscriptionGateway
     }
   }
 
+  @SubscribeMessage('start_recording')
+  handleStartRecording(@ConnectedSocket() socket: Socket) {
+    try {
+      const conversationId = (socket as any).conversationId;
+      const userId = (socket as any).user?.id;
+
+      this.logger.log(
+        `Start recording event received: conversationId=${conversationId}, userId=${userId}`,
+        'TranscriptionGateway',
+      );
+
+      // Notify transcription service to start tracking recording time
+      this.transcriptionService.startRecordingSession(conversationId);
+
+      socket.emit('recording:started', {
+        conversationId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to start recording: ${error.message}`,
+        'TranscriptionGateway',
+      );
+      socket.emit('recording:error', {
+        message: error.message,
+      });
+    }
+  }
+
+  @SubscribeMessage('stop_recording')
+  handleStopRecording(@ConnectedSocket() socket: Socket) {
+    try {
+      const conversationId = (socket as any).conversationId;
+      const userId = (socket as any).user?.id;
+
+      this.logger.log(
+        `Stop recording event received: conversationId=${conversationId}, userId=${userId}`,
+        'TranscriptionGateway',
+      );
+
+      // Notify transcription service to stop recording and accumulate duration
+      this.transcriptionService.stopRecordingSession(conversationId);
+
+      const recordingDuration =
+        this.transcriptionService.getRecordingDuration(conversationId);
+
+      socket.emit('recording:stopped', {
+        conversationId,
+        durationMs: recordingDuration,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to stop recording: ${error.message}`,
+        'TranscriptionGateway',
+      );
+      socket.emit('recording:error', {
+        message: error.message,
+      });
+    }
+  }
+
   @SubscribeMessage('audio_chunk')
   async handleAudioChunk(
     @ConnectedSocket() socket: Socket,

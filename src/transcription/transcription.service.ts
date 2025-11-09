@@ -25,6 +25,10 @@ export class TranscriptionService {
       hasError: boolean;
       lastOriginalSpeaker: string | null;
       lastTranslationSpeaker: string | null;
+      recordingStartTime: Date | null;
+      totalRecordingDurationMs: number;
+      isCurrentlyRecording: boolean;
+      recordingSegments: Array<{ startTime: Date; endTime: Date | null }>;
     }
   >();
 
@@ -71,6 +75,10 @@ export class TranscriptionService {
       hasError: false,
       lastOriginalSpeaker: null,
       lastTranslationSpeaker: null,
+      recordingStartTime: null,
+      totalRecordingDurationMs: 0,
+      isCurrentlyRecording: false,
+      recordingSegments: [],
     });
 
     // Create the connection promise
@@ -254,6 +262,10 @@ export class TranscriptionService {
             hasError: false,
             lastOriginalSpeaker: null,
             lastTranslationSpeaker: null,
+            recordingStartTime: null,
+            totalRecordingDurationMs: 0,
+            isCurrentlyRecording: false,
+            recordingSegments: [],
           });
         }
 
@@ -453,6 +465,104 @@ export class TranscriptionService {
   }
 
   /**
+   * Start recording session - tracks when user actually starts recording
+   */
+  startRecordingSession(conversationId: string): void {
+    const accumulator = this.accumulatedResults.get(conversationId);
+
+    if (!accumulator) {
+      this.logger.warn(
+        `Cannot start recording: accumulator not found for ${conversationId}`,
+      );
+      return;
+    }
+
+    if (accumulator.isCurrentlyRecording) {
+      this.logger.warn(
+        `Recording already in progress for ${conversationId}. Ignoring duplicate start.`,
+      );
+      return;
+    }
+
+    const recordingStartTime = new Date();
+    accumulator.recordingStartTime = recordingStartTime;
+    accumulator.isCurrentlyRecording = true;
+    accumulator.recordingSegments.push({
+      startTime: recordingStartTime,
+      endTime: null,
+    });
+
+    this.logger.log(
+      `Recording started for conversation ${conversationId} at ${recordingStartTime.toISOString()}`,
+    );
+  }
+
+  /**
+   * Stop recording session - accumulates recording time and sets isRecording to false
+   */
+  stopRecordingSession(conversationId: string): void {
+    const accumulator = this.accumulatedResults.get(conversationId);
+
+    if (!accumulator) {
+      this.logger.warn(
+        `Cannot stop recording: accumulator not found for ${conversationId}`,
+      );
+      return;
+    }
+
+    if (!accumulator.isCurrentlyRecording || !accumulator.recordingStartTime) {
+      this.logger.warn(
+        `Recording not in progress for ${conversationId}. Ignoring stop.`,
+      );
+      return;
+    }
+
+    const recordingEndTime = new Date();
+    const segmentDuration =
+      recordingEndTime.getTime() - accumulator.recordingStartTime.getTime();
+
+    // Accumulate the duration and close the current segment
+    accumulator.totalRecordingDurationMs += segmentDuration;
+    accumulator.isCurrentlyRecording = false;
+
+    // Update the last segment's end time
+    const lastSegment = accumulator.recordingSegments[
+      accumulator.recordingSegments.length - 1
+    ];
+    if (lastSegment) {
+      lastSegment.endTime = recordingEndTime;
+    }
+
+    accumulator.recordingStartTime = null;
+
+    this.logger.log(
+      `Recording stopped for conversation ${conversationId}. Segment duration: ${segmentDuration}ms. Total recording duration: ${accumulator.totalRecordingDurationMs}ms`,
+    );
+  }
+
+  /**
+   * Get current recording duration (including in-progress segment)
+   */
+  getRecordingDuration(conversationId: string): number {
+    const accumulator = this.accumulatedResults.get(conversationId);
+
+    if (!accumulator) {
+      return 0;
+    }
+
+    let totalDuration = accumulator.totalRecordingDurationMs;
+
+    // If currently recording, add the duration of the current segment
+    if (accumulator.isCurrentlyRecording && accumulator.recordingStartTime) {
+      const currentSegmentDuration =
+        Date.now() - accumulator.recordingStartTime.getTime();
+      totalDuration += currentSegmentDuration;
+    }
+
+    return totalDuration;
+  }
+
+  /**
    * Get accumulated results for a conversation
    * Returns both results and error/data status flags
    */
@@ -475,11 +585,17 @@ export class TranscriptionService {
       };
     }
 
-    const durationInMs = Date.now() - accumulator.startTime.getTime();
+    // Use recording-based duration if recording was tracked, otherwise use connection time
+    let durationInMs = accumulator.totalRecordingDurationMs;
+
+    // If no recording sessions exist, fall back to connection duration (for backward compatibility)
+    if (accumulator.recordingSegments.length === 0) {
+      durationInMs = Date.now() - accumulator.startTime.getTime();
+    }
 
     // Log results summary for debugging
     this.logger.log(
-      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms`,
+      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms (recording-based: ${accumulator.recordingSegments.length > 0}, segments: ${accumulator.recordingSegments.length})`,
     );
 
     return {
