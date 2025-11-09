@@ -119,6 +119,7 @@ export class TranscriptionService {
       conversationId,
       sourceLanguage,
       targetLanguage,
+      vocabularies,
       resultSubject,
     );
 
@@ -174,6 +175,7 @@ export class TranscriptionService {
     conversationId: string,
     sourceLanguage: string | null,
     targetLanguage: string,
+    vocabularies: any = null,
     resultSubject: Subject<TranslationResultDto>,
   ): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
@@ -207,6 +209,38 @@ export class TranscriptionService {
           // Always include language_hints for Soniox accuracy
           // Use source language if provided, otherwise use common language defaults
           config.language_hints = sourceLanguage ? [sourceLanguage] : ['en'];
+
+          // Add context with custom vocabulary if provided
+          if (vocabularies && Array.isArray(vocabularies) && vocabularies.length > 0) {
+            const terms = vocabularies
+              .filter((v: any) => v.term)
+              .map((v: any) => v.term);
+
+            const contextConfig: any = {};
+
+            if (terms.length > 0) {
+              contextConfig.terms = terms;
+            }
+
+            // Optionally add general context if any vocabulary has context field
+            const contextEntries = vocabularies
+              .filter((v: any) => v.context)
+              .map((v: any) => ({
+                key: 'domain_context',
+                value: v.context,
+              }));
+
+            if (contextEntries.length > 0) {
+              contextConfig.general = contextEntries.slice(0, 1); // Limit to one for simplicity
+            }
+
+            if (Object.keys(contextConfig).length > 0) {
+              config.context = contextConfig;
+              this.logger.log(
+                `Added vocabulary context to Soniox config for conversation ${conversationId}: ${JSON.stringify(contextConfig)}`,
+              );
+            }
+          }
 
           ws.send(JSON.stringify(config));
           resolve(ws);
@@ -305,10 +339,15 @@ export class TranscriptionService {
         }
 
         // Create a new connection and store the promise immediately
+        // Get vocabularies from accumulated results if available
+        const accumulatedData = this.accumulatedResults.get(conversationId);
+        const vocabularies = accumulatedData?.vocabularies || null;
+
         connectionPromise = this.initializeSonioxConnection(
           conversationId,
           sourceLanguage,
           targetLanguage,
+          vocabularies,
           resultSubject,
         );
         this.sonioxConnectionPromises.set(conversationId, connectionPromise);

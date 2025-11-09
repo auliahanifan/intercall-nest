@@ -36,7 +36,7 @@ export class TranscriptionGateway
   private conversationSubscriptions = new Map<string, any>();
   private cleaningUp = new Set<string>();
   private periodicSaveIntervals = new Map<string, NodeJS.Timeout>();
-  private sessionMap = new Map<string, { language: string; transcriptionId: string; terms?: string[] }>();
+  private sessionMap = new Map<string, { language: string; transcriptionId: string; terms?: string[]; vocabularies?: any }>();
 
   constructor(
     private logger: LoggerService,
@@ -261,9 +261,10 @@ export class TranscriptionGateway
       (socket as any).user = session.user;
       (socket as any).session = session;
 
-      // Extract conversationId and targetLanguage from query parameters
+      // Extract conversationId, targetLanguage, and vocabularies from query parameters
       const conversationId = socket.handshake.query.conversationId as string;
       const targetLanguage = socket.handshake.query.targetLanguage as string;
+      const vocabulariesJson = socket.handshake.query.vocabularies as string;
 
       if (!conversationId || !targetLanguage) {
         this.logger.warn(
@@ -274,8 +275,22 @@ export class TranscriptionGateway
         return;
       }
 
+      // Parse vocabularies from JSON string
+      let vocabularies: any = null;
+      if (vocabulariesJson) {
+        try {
+          vocabularies = JSON.parse(vocabulariesJson);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to parse vocabularies JSON for socket ${socket.id}: ${error.message}`,
+            'TranscriptionGateway',
+          );
+        }
+      }
+
       (socket as any).conversationId = conversationId;
       (socket as any).targetLanguage = targetLanguage;
+      (socket as any).vocabularies = vocabularies;
 
       // Get activeOrganizationId from session
       const activeOrganizationId = (session.user as any).activeOrganizationId;
@@ -343,6 +358,7 @@ export class TranscriptionGateway
         await this.transcriptionService.initializeConversation(
           conversationId,
           targetLanguage,
+          vocabularies,
         );
         this.logger.log(
           `Soniox connection initialized for conversation ${conversationId}`,
@@ -353,6 +369,7 @@ export class TranscriptionGateway
         this.sessionMap.set(socket.id, {
           language: targetLanguage,
           transcriptionId: conversationId,
+          vocabularies,
         });
         this.logger.log(
           `Session created in sessionMap for socket ${socket.id}: conversationId=${conversationId}, language=${targetLanguage}`,
