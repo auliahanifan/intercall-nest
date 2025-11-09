@@ -11,7 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { TranscriptionStatus } from '../../generated/prisma/enums';
 import { LoggerService } from '../common/logger/logger.service';
 import { auth } from '../lib/auth';
-import { AudioChunkDto, TranslationResultDto } from './dto';
+import { AudioChunkDto, StartTranscriptionDto, TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
 import { PrismaService } from '../database/prisma.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -35,6 +35,7 @@ export class TranscriptionGateway
   private conversationSubscriptions = new Map<string, any>();
   private cleaningUp = new Set<string>();
   private periodicSaveIntervals = new Map<string, NodeJS.Timeout>();
+  private sessionMap = new Map<string, { language: string; transcriptionId: string; terms?: string[] }>();
 
   constructor(
     private logger: LoggerService,
@@ -482,6 +483,13 @@ export class TranscriptionGateway
         );
       }
 
+      // Clear session information
+      this.sessionMap.delete(socket.id);
+      this.logger.log(
+        `Cleared session for socket ${socket.id}`,
+        'TranscriptionGateway',
+      );
+
       // Close Soniox connection
       try {
         this.transcriptionService.closeConversation(conversationId);
@@ -697,6 +705,40 @@ export class TranscriptionGateway
     }
   }
 
+  @SubscribeMessage('start_transcription')
+  async handleStartTranscription(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: StartTranscriptionDto,
+  ) {
+    try {
+      const { language, transcriptionId, terms } = data;
+
+      this.logger.log(
+        `Start transcription event received: transcriptionId=${transcriptionId}, language=${language}`,
+        'TranscriptionGateway',
+      );
+
+      // Store session information in the session map
+      this.sessionMap.set(socket.id, { language, transcriptionId, terms });
+
+      // Also store conversationId on the socket for backward compatibility
+      (socket as any).conversationId = transcriptionId;
+
+      this.logger.log(
+        `Session started for socket ${socket.id}: transcriptionId=${transcriptionId}, language=${language}`,
+        'TranscriptionGateway',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to start transcription: ${error.message}`,
+        'TranscriptionGateway',
+      );
+      socket.emit('transcription:error', {
+        message: error.message,
+      });
+    }
+  }
+
   @SubscribeMessage('audio_chunk')
   async handleAudioChunk(
     @ConnectedSocket() socket: Socket,
@@ -704,16 +746,28 @@ export class TranscriptionGateway
   ) {
     try {
       const userId = (socket as any).user?.id;
-      const { transcriptionId } = data;
-      // Use targetLanguage from socket connection (source of truth), not from audio chunk
-      const targetLanguage = (socket as any).targetLanguage;
+
+      // Get session information from the sessionMap
+      const sessionInfo = this.sessionMap.get(socket.id);
+      if (!sessionInfo) {
+        this.logger.error(
+          `No session found for socket ${socket.id}. Start transcription first.`,
+          'TranscriptionGateway',
+        );
+        socket.emit('transcription:error', {
+          message: 'Session not started. Please call start_transcription first.',
+        });
+        return;
+      }
+
+      const { transcriptionId, language: targetLanguage } = sessionInfo;
 
       const messageInfo = {
         socketId: socket.id,
         userId: userId,
         conversationId: transcriptionId,
         targetLanguage,
-        chunkSize: data.chunk_base64.length, // Length of base64 string
+        chunkSize: data.chunk.length, // Length in bytes
         receivedAt: new Date().toISOString(),
       };
 
@@ -722,8 +776,8 @@ export class TranscriptionGateway
         'TranscriptionGateway',
       );
 
-      // Decode the Base64 string back to a Buffer
-      const audioBuffer = Buffer.from(data.chunk_base64, 'base64');
+      // Use the binary buffer directly (no decoding needed)
+      const audioBuffer = data.chunk;
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
