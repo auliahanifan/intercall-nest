@@ -11,7 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { TranscriptionStatus } from '../../generated/prisma/enums';
 import { LoggerService } from '../common/logger/logger.service';
 import { auth } from '../lib/auth';
-import { AudioChunkDto, TranslationResultDto } from './dto';
+import { TranslationResultDto } from './dto';
 import { TranscriptionService } from './transcription.service';
 import { PrismaService } from '../database/prisma.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -718,7 +718,7 @@ export class TranscriptionGateway
   @SubscribeMessage('audio_chunk')
   async handleAudioChunk(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() data: AudioChunkDto,
+    @MessageBody() chunk: Buffer,
   ) {
     try {
       const userId = (socket as any).user?.id;
@@ -727,11 +727,11 @@ export class TranscriptionGateway
       const sessionInfo = this.sessionMap.get(socket.id);
       if (!sessionInfo) {
         this.logger.error(
-          `No session found for socket ${socket.id}. Start transcription first.`,
+          `No session found for socket ${socket.id}. Connection session was not initialized.`,
           'TranscriptionGateway',
         );
         socket.emit('transcription:error', {
-          message: 'Session not started. Please call start_transcription first.',
+          message: 'Session not initialized. Please reconnect.',
         });
         return;
       }
@@ -743,7 +743,7 @@ export class TranscriptionGateway
         userId: userId,
         conversationId: transcriptionId,
         targetLanguage,
-        chunkSize: data.chunk.length, // Length in bytes
+        chunkSize: chunk.length, // Length in bytes
         receivedAt: new Date().toISOString(),
       };
 
@@ -753,7 +753,7 @@ export class TranscriptionGateway
       );
 
       // Use the binary buffer directly (no decoding needed)
-      const audioBuffer = data.chunk;
+      const audioBuffer = chunk;
 
       // Send audio chunk to transcription service (auto-initializes on first chunk)
       const resultSubject = await this.transcriptionService.transcribeRealTime(
