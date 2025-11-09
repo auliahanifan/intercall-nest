@@ -709,7 +709,7 @@ export class TranscriptionGateway
   async handleStartTranscription(
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: StartTranscriptionDto,
-  ) {
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       const { language, transcriptionId, terms } = data;
 
@@ -728,14 +728,20 @@ export class TranscriptionGateway
         `Session started for socket ${socket.id}: transcriptionId=${transcriptionId}, language=${language}`,
         'TranscriptionGateway',
       );
+
+      // Return acknowledgment to frontend
+      return { success: true };
     } catch (error) {
       this.logger.error(
         `Failed to start transcription: ${error.message}`,
         'TranscriptionGateway',
       );
-      socket.emit('transcription:error', {
-        message: error.message,
-      });
+
+      // Return error acknowledgment to frontend
+      return {
+        success: false,
+        error: error.message || 'Failed to start transcription session',
+      };
     }
   }
 
