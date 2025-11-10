@@ -20,9 +20,11 @@ import { QuotaExceededException } from '../subscription/exceptions/quota-exceede
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || [
+    origin: [
       'http://localhost:3000',
       'http://localhost:8080',
+      'https://intercallai.com',
+      'https://www.intercallai.com',
     ],
     credentials: true,
   },
@@ -36,7 +38,15 @@ export class TranscriptionGateway
   private conversationSubscriptions = new Map<string, any>();
   private cleaningUp = new Set<string>();
   private periodicSaveIntervals = new Map<string, NodeJS.Timeout>();
-  private sessionMap = new Map<string, { language: string; transcriptionId: string; terms?: string[]; vocabularies?: any }>();
+  private sessionMap = new Map<
+    string,
+    {
+      language: string;
+      transcriptionId: string;
+      terms?: string[];
+      vocabularies?: any;
+    }
+  >();
 
   constructor(
     private logger: LoggerService,
@@ -171,10 +181,7 @@ export class TranscriptionGateway
       this.transcriptionService.getConversationResults(conversationId);
 
     // Skip if no data received yet
-    if (
-      !results.transcriptionResult &&
-      !results.translationResult
-    ) {
+    if (!results.transcriptionResult && !results.translationResult) {
       this.logger.debug(
         `Skipping periodic save - no data yet for ${conversationId}`,
         'TranscriptionGateway',
@@ -292,7 +299,7 @@ export class TranscriptionGateway
       // Prevent multiple browser tabs from corrupting shared state
       const existingSessions = Array.from(this.sessionMap.values());
       const duplicateSession = existingSessions.find(
-        session => session.transcriptionId === conversationId
+        (session) => session.transcriptionId === conversationId,
       );
 
       if (duplicateSession) {
@@ -301,7 +308,8 @@ export class TranscriptionGateway
           'TranscriptionGateway',
         );
         socket.emit('connection:error', {
-          message: 'This conversation is already active in another window. Please close other windows and try again.',
+          message:
+            'This conversation is already active in another window. Please close other windows and try again.',
           code: 'DUPLICATE_CONNECTION',
           conversationId,
         });
@@ -349,7 +357,9 @@ export class TranscriptionGateway
       }
 
       try {
-        await this.subscriptionService.checkQuotaAvailability(activeOrganizationId);
+        await this.subscriptionService.checkQuotaAvailability(
+          activeOrganizationId,
+        );
         this.logger.log(
           `Quota check passed for organization ${activeOrganizationId}`,
           'TranscriptionGateway',
@@ -553,54 +563,54 @@ export class TranscriptionGateway
                 'TranscriptionGateway',
               );
             } else {
-            try {
-              const saveData = {
-                id: conversationId,
-                organizationId,
-                durationInMs: BigInt(results.durationInMs),
-                modelName: 'stt-rt-v3',
-                targetLanguage: results.targetLanguage,
-                sourceLanguage: results.sourceLanguage,
-                transcriptionResult: hasReceivedData
-                  ? results.transcriptionResultJson
-                  : null,
-                translationResult: hasReceivedData
-                  ? results.translationResultJson
-                  : null,
-                vocabularies: hasReceivedData ? results.vocabularies : null,
-                status: finalStatus,
-              };
-
-              // Save with retry logic (upsert handles periodic saves that already created record)
-              await this.saveFinalTranscriptionWithRetry(
-                saveData,
-                conversationId,
-              );
-
-              // Record usage in subscription
               try {
-                await this.subscriptionService.recordUsage(
+                const saveData = {
+                  id: conversationId,
                   organizationId,
-                  BigInt(results.durationInMs),
+                  durationInMs: BigInt(results.durationInMs),
+                  modelName: 'stt-rt-v3',
+                  targetLanguage: results.targetLanguage,
+                  sourceLanguage: results.sourceLanguage,
+                  transcriptionResult: hasReceivedData
+                    ? results.transcriptionResultJson
+                    : null,
+                  translationResult: hasReceivedData
+                    ? results.translationResultJson
+                    : null,
+                  vocabularies: hasReceivedData ? results.vocabularies : null,
+                  status: finalStatus,
+                };
+
+                // Save with retry logic (upsert handles periodic saves that already created record)
+                await this.saveFinalTranscriptionWithRetry(
+                  saveData,
+                  conversationId,
                 );
-                this.logger.log(
-                  `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,
-                  'TranscriptionGateway',
-                );
-              } catch (error) {
+
+                // Record usage in subscription
+                try {
+                  await this.subscriptionService.recordUsage(
+                    organizationId,
+                    BigInt(results.durationInMs),
+                  );
+                  this.logger.log(
+                    `Usage recorded for organization ${organizationId}: ${Number(results.durationInMs) / 60000} minutes`,
+                    'TranscriptionGateway',
+                  );
+                } catch (error) {
+                  this.logger.error(
+                    `Failed to record usage: ${error.message}`,
+                    'TranscriptionGateway',
+                  );
+                  // Continue with cleanup even if usage recording fails
+                }
+              } catch (saveError) {
                 this.logger.error(
-                  `Failed to record usage: ${error.message}`,
+                  `Failed to save transcription after retries: ${saveError.message}`,
                   'TranscriptionGateway',
                 );
-                // Continue with cleanup even if usage recording fails
+                // Continue with cleanup even if save fails
               }
-            } catch (saveError) {
-              this.logger.error(
-                `Failed to save transcription after retries: ${saveError.message}`,
-                'TranscriptionGateway',
-              );
-              // Continue with cleanup even if save fails
-            }
             }
           }
         } else {
@@ -640,7 +650,8 @@ export class TranscriptionGateway
       this.transcriptionService.startRecordingSession(conversationId);
 
       // Get initial duration (should be 0 for fresh start)
-      const initialDurationMs = this.transcriptionService.getRecordingDuration(conversationId);
+      const initialDurationMs =
+        this.transcriptionService.getRecordingDuration(conversationId);
 
       socket.emit('recording:started', {
         conversationId,
@@ -742,7 +753,8 @@ export class TranscriptionGateway
 
       // ✅ AUTO-START: Backend auto-starts recording on first audio chunk
       // This eliminates race conditions and ensures duration is based on actual audio flow
-      const isFirstChunk = !this.transcriptionService.isRecordingActive(transcriptionId);
+      const isFirstChunk =
+        !this.transcriptionService.isRecordingActive(transcriptionId);
       if (isFirstChunk) {
         this.logger.log(
           `Auto-starting recording session for conversation ${transcriptionId} (first audio chunk)`,

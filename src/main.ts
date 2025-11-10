@@ -57,6 +57,17 @@ async function bootstrap() {
   const logger = new LoggerService();
   app.useLogger(logger);
 
+  // Enable CORS for HTTP requests
+  app.enableCors({
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:8080',
+      'https://intercallai.com',
+      'https://www.intercallai.com',
+    ],
+    credentials: true,
+  });
+
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
   logger.log(
     `Server running on 0.0.0.0:${process.env.PORT ?? 3000}`,
