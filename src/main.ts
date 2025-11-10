@@ -21,16 +21,16 @@ async function validateSubscriptionPlans() {
     if (!freePlan) {
       console.error(
         `\n[STARTUP ERROR] Free subscription plan not found in database!\n` +
-        `This is required for auto-organization creation to work properly.\n` +
-        `Please ensure the following record exists in the 'SubscriptionPlan' table:\n` +
-        `- slug: 'free'\n` +
-        `- name: 'Free'\n` +
-        `- description: 'Free tier with limited features'\n` +
-        `- quotaMinutes: 60 (or your desired limit)\n` +
-        `- quotaResetsMonthly: true\n` +
-        `- price: 0\n` +
-        `- currency: 'USD'\n` +
-        `- isActive: true\n\n`,
+          `This is required for auto-organization creation to work properly.\n` +
+          `Please ensure the following record exists in the 'SubscriptionPlan' table:\n` +
+          `- slug: 'free'\n` +
+          `- name: 'Free'\n` +
+          `- description: 'Free tier with limited features'\n` +
+          `- quotaMinutes: 60 (or your desired limit)\n` +
+          `- quotaResetsMonthly: true\n` +
+          `- price: 0\n` +
+          `- currency: 'USD'\n` +
+          `- isActive: true\n\n`,
       );
     } else {
       console.log('[Startup] Free subscription plan verified ✓', {
@@ -57,7 +57,10 @@ async function bootstrap() {
   const logger = new LoggerService();
   app.useLogger(logger);
 
-  await app.listen(process.env.PORT ?? 3000);
-  logger.log(`Server running on port ${process.env.PORT ?? 3000}`, 'Bootstrap');
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
+  logger.log(
+    `Server running on 0.0.0.0:${process.env.PORT ?? 3000}`,
+    'Bootstrap',
+  );
 }
 bootstrap();
