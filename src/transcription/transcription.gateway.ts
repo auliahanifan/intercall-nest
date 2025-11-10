@@ -740,20 +740,15 @@ export class TranscriptionGateway
         receivedAt: new Date().toISOString(),
       };
 
-      // ⚠️ CRITICAL: Validate that recording has been started
-      // Reject audio chunks if user hasn't explicitly started recording
-      // This ensures duration is based on ACTUAL recording time, not connection time
-      if (!this.transcriptionService.isRecordingActive(transcriptionId)) {
-        this.logger.warn(
-          `Audio chunk rejected: Recording not active for conversation ${transcriptionId}. User must call 'start_recording' before sending audio.`,
+      // ✅ AUTO-START: Backend auto-starts recording on first audio chunk
+      // This eliminates race conditions and ensures duration is based on actual audio flow
+      const isFirstChunk = !this.transcriptionService.isRecordingActive(transcriptionId);
+      if (isFirstChunk) {
+        this.logger.log(
+          `Auto-starting recording session for conversation ${transcriptionId} (first audio chunk)`,
           'TranscriptionGateway',
         );
-        socket.emit('transcription:error', {
-          message: 'Recording not started. Please click "Start Recording" before sending audio.',
-          code: 'RECORDING_NOT_STARTED',
-          conversationId: transcriptionId,
-        });
-        return;
+        this.transcriptionService.startRecordingSession(transcriptionId);
       }
 
       this.logger.log(
@@ -764,7 +759,7 @@ export class TranscriptionGateway
       // Use the binary buffer directly (no decoding needed)
       const audioBuffer = chunk;
 
-      // Send audio chunk to transcription service (auto-initializes on first chunk)
+      // Send audio chunk to transcription service
       const resultSubject = await this.transcriptionService.transcribeRealTime(
         transcriptionId,
         null, // Source language is unknown, will be auto-detected

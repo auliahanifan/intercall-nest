@@ -29,6 +29,7 @@ export class TranscriptionService {
       totalRecordingDurationMs: number;
       isCurrentlyRecording: boolean;
       recordingSegments: Array<{ startTime: Date; endTime: Date | null }>;
+      lastAudioChunkTime: Date | null;
       // New fields for tracking final segments with JSON format
       finalOriginalSegments: Array<{
         role: string;
@@ -110,6 +111,7 @@ export class TranscriptionService {
       totalRecordingDurationMs: 0,
       isCurrentlyRecording: false,
       recordingSegments: [],
+      lastAudioChunkTime: null,
       finalOriginalSegments: [],
       finalTranslationSegments: [],
     });
@@ -333,6 +335,7 @@ export class TranscriptionService {
             totalRecordingDurationMs: 0,
             isCurrentlyRecording: false,
             recordingSegments: [],
+            lastAudioChunkTime: null,
             finalOriginalSegments: [],
             finalTranslationSegments: [],
           });
@@ -381,6 +384,12 @@ export class TranscriptionService {
       // Send audio data to Soniox (raw binary)
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(chunk);
+
+        // ✅ Track the last audio chunk time for detecting silence/pauses
+        const accumulator = this.accumulatedResults.get(conversationId);
+        if (accumulator) {
+          accumulator.lastAudioChunkTime = new Date();
+        }
       } else {
         this.logger.warn(
           `WebSocket not ready for conversation: ${conversationId}. State: ${
