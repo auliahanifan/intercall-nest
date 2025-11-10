@@ -118,6 +118,7 @@ export const auth = betterAuth({
     'https://intercall.segarloka.cc', // BACKEND PRODUCTION
     'https://intercallai.segarloka.cc', // FRONTEND PRODUCTION
     'https://intercallai.com',
+    'https://www.intercallai.com',
     'http://localhost:3000', // express
     'http://localhost:8080', // vite
   ],
