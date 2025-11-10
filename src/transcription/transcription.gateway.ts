@@ -288,6 +288,27 @@ export class TranscriptionGateway
         }
       }
 
+      // ⚠️ GUARD: Check for duplicate connection with same conversationId
+      // Prevent multiple browser tabs from corrupting shared state
+      const existingSessions = Array.from(this.sessionMap.values());
+      const duplicateSession = existingSessions.find(
+        session => session.transcriptionId === conversationId
+      );
+
+      if (duplicateSession) {
+        this.logger.warn(
+          `Duplicate connection attempt for conversation ${conversationId} from socket ${socket.id}. Existing session found.`,
+          'TranscriptionGateway',
+        );
+        socket.emit('connection:error', {
+          message: 'This conversation is already active in another window. Please close other windows and try again.',
+          code: 'DUPLICATE_CONNECTION',
+          conversationId,
+        });
+        socket.disconnect();
+        return;
+      }
+
       (socket as any).conversationId = conversationId;
       (socket as any).targetLanguage = targetLanguage;
       (socket as any).vocabularies = vocabularies;
@@ -618,8 +639,12 @@ export class TranscriptionGateway
       // Notify transcription service to start tracking recording time
       this.transcriptionService.startRecordingSession(conversationId);
 
+      // Get initial duration (should be 0 for fresh start)
+      const initialDurationMs = this.transcriptionService.getRecordingDuration(conversationId);
+
       socket.emit('recording:started', {
         conversationId,
+        durationMs: initialDurationMs,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

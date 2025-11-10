@@ -637,8 +637,22 @@ export class TranscriptionService {
     const segmentDuration =
       recordingEndTime.getTime() - accumulator.recordingStartTime.getTime();
 
-    // Accumulate the duration and close the current segment
-    accumulator.totalRecordingDurationMs += segmentDuration;
+    // ⚠️ MINIMUM DURATION THRESHOLD: Enforce 1-second minimum billable duration
+    // Prevents accidental clicks from being charged (e.g., Start → Stop instantly)
+    const MIN_BILLABLE_DURATION_MS = 1000; // 1 second
+    let isBillableSegment = true;
+
+    if (segmentDuration < MIN_BILLABLE_DURATION_MS) {
+      this.logger.warn(
+        `Recording segment too short (${segmentDuration}ms < ${MIN_BILLABLE_DURATION_MS}ms) for ${conversationId}. Marking as non-billable.`,
+      );
+      isBillableSegment = false;
+    }
+
+    // Accumulate the duration and close the current segment (only if billable)
+    if (isBillableSegment) {
+      accumulator.totalRecordingDurationMs += segmentDuration;
+    }
     accumulator.isCurrentlyRecording = false;
 
     // Update the last segment's end time
@@ -651,7 +665,7 @@ export class TranscriptionService {
     accumulator.recordingStartTime = null;
 
     this.logger.log(
-      `Recording stopped for conversation ${conversationId}. Segment duration: ${segmentDuration}ms. Total recording duration: ${accumulator.totalRecordingDurationMs}ms. Total segments: ${accumulator.recordingSegments.length}`,
+      `Recording stopped for conversation ${conversationId}. Segment duration: ${segmentDuration}ms${!isBillableSegment ? ' (non-billable)' : ''}. Total recording duration: ${accumulator.totalRecordingDurationMs}ms. Total segments: ${accumulator.recordingSegments.length}`,
     );
   }
 
@@ -711,8 +725,8 @@ export class TranscriptionService {
     }
 
     // Use ONLY recording-based duration (from explicit start/stop events)
-    // No fallback to connection time - ensures accurate billing
-    const durationInMs = accumulator.totalRecordingDurationMs;
+    // Include in-progress segments to ensure accurate billing on disconnect
+    const durationInMs = this.getRecordingDuration(conversationId);
 
     // Log detailed results summary for debugging duration tracking
     this.logger.log(
