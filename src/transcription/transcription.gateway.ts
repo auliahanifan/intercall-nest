@@ -479,50 +479,59 @@ export class TranscriptionGateway
         const organizationId = (socket as any).activeOrganizationId;
 
         if (organizationId) {
-          // Validate and determine status
-          const hasReceivedData = results.hasReceivedData;
-          const hasError = results.hasError;
-
-          const hasValidTargetLanguage =
-            results.targetLanguage &&
-            results.targetLanguage.trim().length > 0;
-
-          // Determine final status:
-          // - COMPLETED: Has data (preserves partial data from errors)
-          // - FAILED: No data but errors occurred
-          // - NO_DATA: No data and no errors
-          let finalStatus: TranscriptionStatus;
-          if (hasReceivedData) {
-            // ALWAYS save data if we received any, even if errors occurred
-            finalStatus = TranscriptionStatus.COMPLETED;
-          } else if (hasError) {
-            // Errors occurred but no data received
-            finalStatus = TranscriptionStatus.FAILED;
-          } else {
-            // No errors and no data (normal timeout or quick disconnect)
-            finalStatus = TranscriptionStatus.NO_DATA;
-          }
-
-          // Log detailed information about what we're saving
-          this.logger.log(
-            `Preparing to save transcription - conversationId: ${conversationId}, ` +
-              `targetLanguage: ${results.targetLanguage || 'null'}, ` +
-              `transcriptionLength: ${results.transcriptionResultJson?.length || 0}, ` +
-              `translationLength: ${results.translationResultJson?.length || 0}, ` +
-              `hasReceivedData: ${hasReceivedData}, ` +
-              `hasError: ${hasError}, ` +
-              `finalStatus: ${finalStatus}, ` +
-              `durationMs: ${results.durationInMs}`,
-            'TranscriptionGateway',
-          );
-
-          // Only save if we have a valid target language and organization
-          if (!hasValidTargetLanguage) {
+          // ⚠️ SAFEGUARD: Skip saving if duration is 0
+          // User never started recording, so no billable session occurred
+          if (results.durationInMs === 0) {
             this.logger.warn(
-              `Missing or invalid targetLanguage for conversation ${conversationId}. Status: ${finalStatus}. Skipping save.`,
+              `Skipping transcription save - Duration is 0ms for conversation ${conversationId}. User never started recording.`,
               'TranscriptionGateway',
             );
+            // Continue to cleanup, just don't save to database
           } else {
+            // Validate and determine status
+            const hasReceivedData = results.hasReceivedData;
+            const hasError = results.hasError;
+
+            const hasValidTargetLanguage =
+              results.targetLanguage &&
+              results.targetLanguage.trim().length > 0;
+
+            // Determine final status:
+            // - COMPLETED: Has data (preserves partial data from errors)
+            // - FAILED: No data but errors occurred
+            // - NO_DATA: No data and no errors
+            let finalStatus: TranscriptionStatus;
+            if (hasReceivedData) {
+              // ALWAYS save data if we received any, even if errors occurred
+              finalStatus = TranscriptionStatus.COMPLETED;
+            } else if (hasError) {
+              // Errors occurred but no data received
+              finalStatus = TranscriptionStatus.FAILED;
+            } else {
+              // No errors and no data (normal timeout or quick disconnect)
+              finalStatus = TranscriptionStatus.NO_DATA;
+            }
+
+            // Log detailed information about what we're saving
+            this.logger.log(
+              `Preparing to save transcription - conversationId: ${conversationId}, ` +
+                `targetLanguage: ${results.targetLanguage || 'null'}, ` +
+                `transcriptionLength: ${results.transcriptionResultJson?.length || 0}, ` +
+                `translationLength: ${results.translationResultJson?.length || 0}, ` +
+                `hasReceivedData: ${hasReceivedData}, ` +
+                `hasError: ${hasError}, ` +
+                `finalStatus: ${finalStatus}, ` +
+                `durationMs: ${results.durationInMs}`,
+              'TranscriptionGateway',
+            );
+
+            // Only save if we have a valid target language and organization
+            if (!hasValidTargetLanguage) {
+              this.logger.warn(
+                `Missing or invalid targetLanguage for conversation ${conversationId}. Status: ${finalStatus}. Skipping save.`,
+                'TranscriptionGateway',
+              );
+            } else {
             try {
               const saveData = {
                 id: conversationId,
@@ -570,6 +579,7 @@ export class TranscriptionGateway
                 'TranscriptionGateway',
               );
               // Continue with cleanup even if save fails
+            }
             }
           }
         } else {
@@ -704,6 +714,22 @@ export class TranscriptionGateway
         chunkSize: chunk.length, // Length in bytes
         receivedAt: new Date().toISOString(),
       };
+
+      // ⚠️ CRITICAL: Validate that recording has been started
+      // Reject audio chunks if user hasn't explicitly started recording
+      // This ensures duration is based on ACTUAL recording time, not connection time
+      if (!this.transcriptionService.isRecordingActive(transcriptionId)) {
+        this.logger.warn(
+          `Audio chunk rejected: Recording not active for conversation ${transcriptionId}. User must call 'start_recording' before sending audio.`,
+          'TranscriptionGateway',
+        );
+        socket.emit('transcription:error', {
+          message: 'Recording not started. Please click "Start Recording" before sending audio.',
+          code: 'RECORDING_NOT_STARTED',
+          conversationId: transcriptionId,
+        });
+        return;
+      }
 
       this.logger.log(
         `Audio chunk received: ${JSON.stringify(messageInfo)}`,

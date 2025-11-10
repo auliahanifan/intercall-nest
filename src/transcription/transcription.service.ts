@@ -609,7 +609,7 @@ export class TranscriptionService {
     });
 
     this.logger.log(
-      `Recording started for conversation ${conversationId} at ${recordingStartTime.toISOString()}`,
+      `Recording started for conversation ${conversationId} at ${recordingStartTime.toISOString()}. Current segments: ${accumulator.recordingSegments.length}. Total accumulated: ${accumulator.totalRecordingDurationMs}ms`,
     );
   }
 
@@ -651,7 +651,7 @@ export class TranscriptionService {
     accumulator.recordingStartTime = null;
 
     this.logger.log(
-      `Recording stopped for conversation ${conversationId}. Segment duration: ${segmentDuration}ms. Total recording duration: ${accumulator.totalRecordingDurationMs}ms`,
+      `Recording stopped for conversation ${conversationId}. Segment duration: ${segmentDuration}ms. Total recording duration: ${accumulator.totalRecordingDurationMs}ms. Total segments: ${accumulator.recordingSegments.length}`,
     );
   }
 
@@ -675,6 +675,14 @@ export class TranscriptionService {
     }
 
     return totalDuration;
+  }
+
+  /**
+   * Check if recording is currently active
+   */
+  isRecordingActive(conversationId: string): boolean {
+    const accumulator = this.accumulatedResults.get(conversationId);
+    return accumulator?.isCurrentlyRecording ?? false;
   }
 
   /**
@@ -702,17 +710,25 @@ export class TranscriptionService {
       };
     }
 
-    // Use recording-based duration if recording was tracked, otherwise use connection time
-    let durationInMs = accumulator.totalRecordingDurationMs;
+    // Use ONLY recording-based duration (from explicit start/stop events)
+    // No fallback to connection time - ensures accurate billing
+    const durationInMs = accumulator.totalRecordingDurationMs;
 
-    // If no recording sessions exist, fall back to connection duration (for backward compatibility)
-    if (accumulator.recordingSegments.length === 0) {
-      durationInMs = Date.now() - accumulator.startTime.getTime();
-    }
-
-    // Log results summary for debugging
+    // Log detailed results summary for debugging duration tracking
     this.logger.log(
-      `Results for conversation ${conversationId}: ${accumulator.originalTokens.length} original tokens, ${accumulator.translationTokens.length} translation tokens. ${accumulator.finalOriginalSegments.length} final original segments, ${accumulator.finalTranslationSegments.length} final translation segments. hasError=${accumulator.hasError}, hasReceivedData=${accumulator.hasReceivedData}. Duration: ${durationInMs}ms (recording-based: ${accumulator.recordingSegments.length > 0}, segments: ${accumulator.recordingSegments.length})`,
+      `FINAL RESULTS for conversation ${conversationId}:`,
+    );
+    this.logger.log(
+      `  Duration: ${durationInMs}ms (${(durationInMs / 1000).toFixed(2)}s) from ${accumulator.recordingSegments.length} recording segments`,
+    );
+    this.logger.log(
+      `  Transcription: ${accumulator.originalTokens.length} tokens, ${accumulator.finalOriginalSegments.length} segments`,
+    );
+    this.logger.log(
+      `  Translation: ${accumulator.translationTokens.length} tokens, ${accumulator.finalTranslationSegments.length} segments`,
+    );
+    this.logger.log(
+      `  Status: hasData=${accumulator.hasReceivedData}, hasError=${accumulator.hasError}`,
     );
 
     return {
