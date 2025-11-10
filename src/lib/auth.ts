@@ -21,7 +21,11 @@ function generateSlug(text: string): string {
  * Creates a default organization for a user
  * Throws an error if organization creation fails
  */
-async function createDefaultOrganization(user: { id: string; name?: string; email: string }): Promise<string> {
+async function createDefaultOrganization(user: {
+  id: string;
+  name?: string;
+  email: string;
+}): Promise<string> {
   const orgName = `${user.name || user.email}'s Default`;
   let slug = generateSlug(orgName);
   let isSlugAvailable = false;
@@ -113,6 +117,7 @@ export const auth = betterAuth({
   trustedOrigins: [
     'https://intercall.segarloka.cc', // BACKEND PRODUCTION
     'https://intercallai.segarloka.cc', // FRONTEND PRODUCTION
+    'https://intercallai.com',
     'http://localhost:3000', // express
     'http://localhost:8080', // vite
   ],
@@ -161,17 +166,24 @@ export const auth = betterAuth({
       // If user has no organization, create one on-demand
       if (!member) {
         try {
-          console.log(`No organization found for user ${user.id}. Creating default organization...`);
+          console.log(
+            `No organization found for user ${user.id}. Creating default organization...`,
+          );
           const organizationId = await createDefaultOrganization(user);
           // Fetch the newly created member record
           member = await prisma.member.findFirst({
             where: { userId: { equals: user.id } },
           });
           if (!member) {
-            console.warn(`Failed to create organization membership for user ${user.id}`);
+            console.warn(
+              `Failed to create organization membership for user ${user.id}`,
+            );
           }
         } catch (error) {
-          console.error(`Failed to auto-create organization for user ${user.id}:`, error);
+          console.error(
+            `Failed to auto-create organization for user ${user.id}:`,
+            error,
+          );
           // Continue without organization - user will see disconnect on WebSocket connection
         }
       }
@@ -215,7 +227,10 @@ export const auth = betterAuth({
             try {
               await createDefaultOrganization(user);
             } catch (error) {
-              console.error('CRITICAL: Failed to create default organization for new user:', error);
+              console.error(
+                'CRITICAL: Failed to create default organization for new user:',
+                error,
+              );
               throw error; // Throw to prevent user creation if organization setup fails
             }
           }
