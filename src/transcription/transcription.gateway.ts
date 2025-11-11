@@ -25,8 +25,10 @@ import { QuotaExceededException } from '../subscription/exceptions/quota-exceede
       'http://localhost:8080',
       'https://intercallai.com',
       'https://www.intercallai.com',
+      'https://intercallai.segarloka.cc',
     ],
     credentials: true,
+    allowedHeaders: '*',
   },
 })
 export class TranscriptionGateway
