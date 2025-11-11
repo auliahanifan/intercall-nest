@@ -115,10 +115,10 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
   secret: process.env.BETTER_AUTH_SECRET || 'your-secret-key',
   trustedOrigins: [
-    'https://intercall.segarloka.cc', // BACKEND PRODUCTION
-    'https://intercallai.segarloka.cc', // FRONTEND PRODUCTION
+    'https://intercallai-be-production.up.railway.app', // BACKEND PRODUCTION
+    'https://www.intercallai.com', // FRONTEND PRODUCTION
     'https://intercallai.com',
-    'https://www.intercallai.com',
+    'https://intercallai.segarloka.cc',
     'http://localhost:3000', // express
     'http://localhost:8080', // vite
   ],
@@ -127,6 +127,8 @@ export const auth = betterAuth({
       enabled: true,
       maxAge: 60 * 24 * 60 * 365,
     },
+    sameSite: 'none',
+    secure: true,
   },
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
