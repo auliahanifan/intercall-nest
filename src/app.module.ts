@@ -10,7 +10,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 
 @Module({
-  imports: [AuthModule.forRoot({ auth, disableTrustedOriginsCors: true }), TranscriptionModule, LoggerModule, UserModule, SubscriptionModule],
+  imports: [AuthModule.forRoot({ auth }), TranscriptionModule, LoggerModule, UserModule, SubscriptionModule],
   controllers: [AppController],
   providers: [AppService],
 })

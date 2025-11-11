@@ -115,7 +115,7 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
   secret: process.env.BETTER_AUTH_SECRET || 'your-secret-key',
   trustedOrigins: [
-    'https://intercallai-be-production.up.railway.app', // BACKEND PRODUCTION
+    'https://api.intercallai.com', // BACKEND PRODUCTION
     'https://www.intercallai.com', // FRONTEND PRODUCTION
     'https://intercallai.com',
     'https://intercallai.segarloka.cc',

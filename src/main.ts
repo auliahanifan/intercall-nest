@@ -61,13 +61,22 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:3000',
+      'http://localhost:5173',
       'http://localhost:8080',
       'https://intercallai.com',
       'https://www.intercallai.com',
       'https://intercallai.segarloka.cc',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: '*',
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Cookie',
+    ],
+    exposedHeaders: ['Set-Cookie'],
     credentials: true,
   });
 
