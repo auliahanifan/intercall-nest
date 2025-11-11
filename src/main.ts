@@ -66,6 +66,7 @@ async function bootstrap() {
       'https://www.intercallai.com',
       'https://intercallai.segarloka.cc',
     ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: '*',
     credentials: true,
   });
