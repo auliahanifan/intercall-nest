@@ -64,7 +64,9 @@ async function bootstrap() {
       'http://localhost:8080',
       'https://intercallai.com',
       'https://www.intercallai.com',
+      'https://intercallai.segarloka.cc',
     ],
+    allowedHeaders: '*',
     credentials: true,
   });
 
