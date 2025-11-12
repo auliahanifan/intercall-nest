@@ -278,15 +278,16 @@ export class TranscriptionGateway
       const vocabulariesJson = socket.handshake.query.vocabularies as string;
 
       // Parse sample rate from query parameter
-      let sampleRate: number | null = null;
+      let sampleRate: number | undefined;
       if (sampleRateStr) {
-        sampleRate = parseInt(sampleRateStr, 10);
-        if (isNaN(sampleRate) || sampleRate < 8000 || sampleRate > 48000) {
+        const parsedRate = parseInt(sampleRateStr, 10);
+        if (!isNaN(parsedRate) && parsedRate >= 8000 && parsedRate <= 48000) {
+          sampleRate = parsedRate;
+        } else {
           this.logger.warn(
             `Invalid sample rate provided: ${sampleRateStr}. Must be between 8000 and 48000 Hz.`,
             'TranscriptionGateway',
           );
-          sampleRate = null;
         }
       }
 
