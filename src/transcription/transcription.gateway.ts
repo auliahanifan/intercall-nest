@@ -47,6 +47,7 @@ export class TranscriptionGateway
       transcriptionId: string;
       terms?: string[];
       vocabularies?: any;
+      sampleRate?: number;
     }
   >();
 
@@ -270,10 +271,24 @@ export class TranscriptionGateway
       (socket as any).user = session.user;
       (socket as any).session = session;
 
-      // Extract conversationId, targetLanguage, and vocabularies from query parameters
+      // Extract conversationId, targetLanguage, sampleRate, and vocabularies from query parameters
       const conversationId = socket.handshake.query.conversationId as string;
       const targetLanguage = socket.handshake.query.targetLanguage as string;
+      const sampleRateStr = socket.handshake.query.sampleRate as string;
       const vocabulariesJson = socket.handshake.query.vocabularies as string;
+
+      // Parse sample rate from query parameter
+      let sampleRate: number | null = null;
+      if (sampleRateStr) {
+        sampleRate = parseInt(sampleRateStr, 10);
+        if (isNaN(sampleRate) || sampleRate < 8000 || sampleRate > 48000) {
+          this.logger.warn(
+            `Invalid sample rate provided: ${sampleRateStr}. Must be between 8000 and 48000 Hz.`,
+            'TranscriptionGateway',
+          );
+          sampleRate = null;
+        }
+      }
 
       if (!conversationId || !targetLanguage) {
         this.logger.warn(
@@ -321,6 +336,7 @@ export class TranscriptionGateway
 
       (socket as any).conversationId = conversationId;
       (socket as any).targetLanguage = targetLanguage;
+      (socket as any).sampleRate = sampleRate;
       (socket as any).vocabularies = vocabularies;
 
       // Get activeOrganizationId from session
@@ -393,6 +409,7 @@ export class TranscriptionGateway
           targetLanguage,
           null, // sourceLanguage (will be auto-detected by Soniox)
           vocabularies,
+          sampleRate, // Client's native audio sample rate
         );
         this.logger.log(
           `Soniox connection initialized for conversation ${conversationId}`,
@@ -404,6 +421,7 @@ export class TranscriptionGateway
           language: targetLanguage,
           transcriptionId: conversationId,
           vocabularies,
+          sampleRate,
         });
         this.logger.log(
           `Session created in sessionMap for socket ${socket.id}: conversationId=${conversationId}, language=${targetLanguage}`,

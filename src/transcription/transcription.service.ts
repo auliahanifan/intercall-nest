@@ -75,6 +75,7 @@ export class TranscriptionService {
     targetLanguage: string,
     sourceLanguage: string | null = null,
     vocabularies: any = null,
+    sampleRate: number | null = null,
   ): Promise<void> {
     // Create or get the subject for this conversation
     let resultSubject = this.conversationSubjects.get(conversationId);
@@ -123,6 +124,7 @@ export class TranscriptionService {
       targetLanguage,
       vocabularies,
       resultSubject,
+      sampleRate,
     );
 
     this.sonioxConnectionPromises.set(conversationId, connectionPromise);
@@ -179,6 +181,7 @@ export class TranscriptionService {
     targetLanguage: string,
     vocabularies: any = null,
     resultSubject: Subject<TranslationResultDto>,
+    sampleRate: number | null = null,
   ): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
       try {
@@ -193,6 +196,8 @@ export class TranscriptionService {
           );
 
           // Send configuration to Soniox
+          // Use dynamic sample rate from client, or default to 16000 if not provided
+          const effectiveSampleRate = sampleRate || 16000;
           const config: any = {
             api_key: process.env.SONIOX_API_KEY,
             model: 'stt-rt-v3',
@@ -200,13 +205,17 @@ export class TranscriptionService {
             enable_speaker_diarization: true,
             enable_endpoint_detection: true,
             audio_format: 'pcm_s16le',
-            sample_rate: 16000,
+            sample_rate: effectiveSampleRate,
             num_channels: 1,
             translation: {
               type: 'one_way',
               target_language: targetLanguage,
             },
           };
+
+          this.logger.log(
+            `Soniox config for conversation ${conversationId}: sample_rate=${effectiveSampleRate}Hz (provided=${sampleRate}Hz)`,
+          );
 
           // Always include language_hints for Soniox accuracy
           // Use source language if provided, otherwise use common language defaults
